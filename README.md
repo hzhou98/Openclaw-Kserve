@@ -676,15 +676,129 @@ argocd app diff openclaw-stack
 
 ## Teardown
 
-```bash
-# Delete everything (cluster + all workloads)
-cd terraform
-terraform destroy
+There are multiple levels of teardown depending on how much you want to remove.
 
-# Or just delete workloads but keep the cluster:
-kubectl delete inferenceservice llama-3-2b -n kserve   # Stops GPU cost
+### Option 1: Stop GPU costs only (keep everything else)
+
+Remove the InferenceService so the GPU node scales to zero. The cluster, KServe, and OpenClaw stay running. You can re-apply the InferenceService later to bring the model back.
+
+```bash
+# Delete the model — GPU node pool scales to 0 within ~10 min
+kubectl delete inferenceservice llama-3-2b -n kserve
+
+# Verify GPU node is gone
+kubectl get nodes -l pool=gpu
+# No resources found
+
+# Cost after this: ~$0.01/hr (system pool only)
+```
+
+To bring the model back:
+```bash
+kubectl apply -f kserve/llama-inferenceservice.yaml
+```
+
+### Option 2: Delete all workloads (keep the cluster)
+
+Remove OpenClaw, the model, and KServe but keep the GKE cluster for other use.
+
+```bash
+# Delete OpenClaw
 helm uninstall openclaw -n openclaw
+kubectl delete namespace openclaw
+
+# Delete model and KServe
+kubectl delete inferenceservice llama-3-2b -n kserve
+helm uninstall kserve -n kserve
+helm uninstall kserve-crd -n kserve
+kubectl delete namespace kserve
+
+# Delete Istio
+helm uninstall istio-ingressgateway -n istio-system
+helm uninstall istiod -n istio-system
+helm uninstall istio-base -n istio-system
+kubectl delete namespace istio-system
+
+# Delete cert-manager
+helm uninstall cert-manager -n cert-manager
+kubectl delete namespace cert-manager
 
 # If using ArgoCD:
-argocd app delete openclaw-stack --cascade  # Deletes all child apps too
+argocd app delete openclaw-stack --cascade  # Deletes all child apps
+helm uninstall argocd -n argocd
+kubectl delete namespace argocd
+
+# Cost after this: ~$0.01/hr (empty system pool)
 ```
+
+### Option 3: Delete the GKE cluster (keep the GCP project)
+
+Destroy all Terraform-managed infrastructure. This deletes the cluster, all node pools, all workloads, and all persistent disks.
+
+```bash
+cd terraform
+terraform destroy
+# Type "yes" when prompted
+
+# Verify — should show no clusters
+gcloud container clusters list --project=$(terraform output -raw cluster_name 2>/dev/null || cat terraform.tfvars | grep project_id | cut -d'"' -f2)
+
+# Cost after this: $0.00/hr (nothing running)
+```
+
+To redeploy from scratch later:
+```bash
+./deploy.sh
+```
+
+### Option 4: Delete the entire GCP project (nuclear option)
+
+This is the cleanest teardown — it deletes the project and **everything inside it**: the cluster, all VMs, disks, networking, IAM policies, and API configurations. Nothing survives. Billing stops immediately.
+
+```bash
+# First, check what project you're about to delete
+gcloud config get-value project
+# openclaw-kserve-001
+
+# Delete the project
+gcloud projects delete openclaw-kserve-001
+
+# You will be prompted to confirm. Type the project ID again.
+```
+
+**Important details about project deletion:**
+
+- **30-day recovery window**: GCP doesn't delete the project immediately. It enters a "pending deletion" state for 30 days, during which you can restore it:
+  ```bash
+  # Restore a project within the 30-day window
+  gcloud projects undelete openclaw-kserve-001
+  ```
+  After 30 days, the project and all data are permanently destroyed.
+
+- **Billing stops immediately**: Even though the project isn't fully deleted for 30 days, you stop being charged as soon as you run the delete command. All resources are shut down.
+
+- **Project ID is reserved**: The globally unique project ID cannot be reused by anyone (including you) even after the project is permanently deleted. Choose a new ID if you recreate.
+
+- **Organization-managed projects**: If the project was created under an organization, you need the `resourcemanager.projects.delete` permission on the project. Org admins may have restricted this. If denied:
+  ```bash
+  # Check who can delete projects in your org
+  gcloud projects get-iam-policy openclaw-kserve-001 \
+    --format="table(bindings.role, bindings.members)" \
+    --filter="bindings.role:roles/resourcemanager.projectDeleter OR bindings.role:roles/owner"
+  ```
+
+- **Terraform state**: If you delete the project via `gcloud` instead of `terraform destroy`, Terraform's state file will be out of sync. Clean it up:
+  ```bash
+  # Remove stale state after manual project deletion
+  cd terraform
+  rm -f terraform.tfstate terraform.tfstate.backup
+  ```
+
+### Teardown comparison
+
+| Method | What's deleted | Recovery | Time to $0 cost |
+|--------|---------------|----------|-----------------|
+| Delete InferenceService | Model pod + GPU node | Re-apply YAML | ~10 min |
+| Helm uninstall all | All workloads | Re-run deploy.sh | ~5 min |
+| `terraform destroy` | Cluster + nodes + disks | Re-run deploy.sh (~15 min) | Immediate |
+| `gcloud projects delete` | Everything in the project | `gcloud projects undelete` within 30 days | Immediate |
