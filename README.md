@@ -88,7 +88,56 @@ sudo apt-get install google-cloud-cli-gke-gcloud-auth-plugin
 gke-gcloud-auth-plugin --version
 ```
 
-#### 2. Authenticate
+#### 2. Install Terraform, kubectl, and Helm
+
+These three tools are needed alongside gcloud for the deployment.
+
+**Terraform** — Infrastructure-as-code tool that creates the GKE cluster.
+
+```bash
+# macOS
+brew install terraform
+
+# Linux (Debian/Ubuntu) — add HashiCorp repo first
+wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+sudo apt update && sudo apt install terraform
+
+# Verify
+terraform version
+```
+
+**kubectl** — Kubernetes CLI for managing workloads in the cluster.
+
+```bash
+# Via gcloud (easiest if gcloud is already installed)
+gcloud components install kubectl
+
+# macOS
+brew install kubectl
+
+# Linux
+curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+# Verify
+kubectl version --client
+```
+
+**Helm** — Kubernetes package manager. KServe, Istio, cert-manager, and OpenClaw are all installed via Helm charts.
+
+```bash
+# macOS
+brew install helm
+
+# Linux
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+# Verify
+helm version
+```
+
+#### 3. Authenticate
 
 Two authentications are needed — one for the gcloud CLI itself, and one for Terraform (which uses Application Default Credentials):
 
@@ -103,7 +152,7 @@ gcloud auth application-default login
 
 **Why two authentications?** `gcloud auth login` stores credentials that only the `gcloud` CLI uses. Terraform and other SDKs use a separate credential file called Application Default Credentials (ADC). `gcloud auth application-default login` creates this file.
 
-#### 3. Create a GCP project
+#### 4. Create a GCP project
 
 Every GCP resource lives inside a project. Projects have globally unique IDs, their own billing, IAM policies, and API quotas.
 
@@ -167,7 +216,7 @@ gcloud config set project openclaw-kserve-001
 
 **Tip**: Use a dedicated project so you can see all costs in one place and tear everything down cleanly.
 
-#### 4. Link a billing account
+#### 5. Link a billing account
 
 GCP won't let you create any paid resources (VMs, GPUs, disks) without a billing account linked to the project.
 
@@ -190,7 +239,7 @@ gcloud billing projects describe openclaw-kserve-001
 # billingEnabled: true
 ```
 
-#### 5. Enable required APIs
+#### 6. Enable required APIs
 
 GCP APIs are disabled by default. Each must be explicitly enabled before use.
 
@@ -218,7 +267,7 @@ What each API does:
 | `iamcredentials.googleapis.com` | Short-lived service account credentials. Required by Workload Identity. |
 | `cloudresourcemanager.googleapis.com` | Project metadata. Terraform needs this to verify the project exists. |
 
-#### 6. Check and request GPU quota
+#### 7. Check and request GPU quota
 
 **This is the most common blocker for new GCP accounts.** New projects often have a GPU quota of **zero** — you must request an increase before any GPU VMs can be created.
 
@@ -256,7 +305,7 @@ If the limit is 0, request an increase:
 - Try a different GPU (`nvidia-tesla-v100` or `nvidia-l4`)
 - Start without GPU (cluster + system pool work fine; add GPU later)
 
-#### 7. Set default region and zone
+#### 8. Set default region and zone
 
 ```bash
 # These defaults are used by gcloud commands that don't specify --region/--zone
@@ -267,7 +316,7 @@ gcloud config set compute/zone us-central1-a
 gcloud config list
 ```
 
-#### 8. Configure Terraform
+#### 9. Configure Terraform
 
 ```bash
 cp terraform/terraform.tfvars.example terraform/terraform.tfvars

@@ -4,3 +4,5 @@ terraform/terraform.tfstate
 terraform/terraform.tfstate.backup
 terraform/terraform.tfvars
 *.bak
+kserve/.hf_secret
+kserve/.hf_token

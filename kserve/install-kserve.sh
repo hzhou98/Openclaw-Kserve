@@ -39,9 +39,13 @@
 #     - The model pod runs continuously on its GPU node, which avoids
 #       cold-start latency from model reloading (~2-3 min for 3B model)
 #
-# Each `helm install` uses --wait, which blocks until all pods in that
-# release are Running/Ready. This ensures each component is fully operational
-# before the next one starts (cert-manager must be ready before KServe, etc.).
+# Idempotency:
+#   All Helm commands use `helm upgrade --install` so this script is safe
+#   to re-run. If a release already exists, it upgrades; if not, it installs.
+#
+#   Istio resources that may have field ownership conflicts (e.g., webhooks
+#   managed by istiod/pilot-discovery) are adopted by Helm via annotation
+#   before the upgrade, preventing "conflict with pilot-discovery" errors.
 #
 # Prerequisites:
 #   - kubectl configured to point at the target cluster
@@ -67,7 +71,7 @@ echo "=== Installing KServe dependencies ==="
 echo "--- Installing cert-manager ---"
 helm repo add jetstack https://charts.jetstack.io --force-update
 helm repo update jetstack
-helm install cert-manager jetstack/cert-manager \
+helm upgrade --install cert-manager jetstack/cert-manager \
   --namespace cert-manager \
   --create-namespace \
   --version v1.16.3 \
@@ -104,17 +108,34 @@ echo "--- Installing Istio ---"
 helm repo add istio https://istio-release.storage.googleapis.com/charts --force-update
 helm repo update istio
 
-helm install istio-base istio/base \
+# Handle Istio webhook field ownership conflict on re-runs.
+#
+# When istiod (pilot-discovery) starts, it continuously reconciles the
+# istiod-default-validator ValidatingWebhookConfiguration, claiming
+# server-side apply field ownership. When Helm later tries to upgrade
+# istio-base, it conflicts because pilot-discovery owns .failurePolicy.
+#
+# Transferring ownership doesn't work because istiod reclaims it
+# immediately. The reliable fix is to delete the webhook before the
+# upgrade — the istio-base Helm chart recreates it with Helm as owner.
+# istiod will still reconcile it afterwards, but the initial install
+# succeeds without conflict.
+if kubectl get validatingwebhookconfiguration istiod-default-validator &>/dev/null; then
+  echo "  Deleting istiod-default-validator to avoid field ownership conflict..."
+  kubectl delete validatingwebhookconfiguration istiod-default-validator
+fi
+
+helm upgrade --install istio-base istio/base \
   --namespace istio-system \
   --create-namespace \
   --set defaultRevision=default \
   --wait
 
-helm install istiod istio/istiod \
+helm upgrade --install istiod istio/istiod \
   --namespace istio-system \
   --wait
 
-helm install istio-ingressgateway istio/gateway \
+helm upgrade --install istio-ingressgateway istio/gateway \
   --namespace istio-system \
   --set service.type=LoadBalancer \
   --wait
@@ -138,26 +159,41 @@ helm install istio-ingressgateway istio/gateway \
 #    --set kserve.controller.deploymentMode=RawDeployment:
 #      Use standard K8s Deployments instead of Knative Services.
 #
-#    --set kserve.controller.gateway.ingressGateway=istio-system/istio-ingressgateway:
-#      Tells KServe which Istio gateway to use for external traffic routing.
-#      Format is <namespace>/<gateway-name>.
+#    --set kserve.controller.gateway.ingressGateway.className=istio:
+#      Tells KServe to use the "istio" IngressClass for external traffic
+#      routing in RawDeployment mode. KServe creates Ingress resources
+#      that reference this class, and Istio's ingress controller picks
+#      them up.
 #
 # We use OCI-based Helm charts (oci://ghcr.io/kserve/charts/*) which is
 # KServe's official distribution method since v0.11+.
 # Version v0.14.1 is pinned for reproducibility.
 # -----------------------------------------------------------------------------
 echo "--- Installing KServe ---"
-helm install kserve-crd oci://ghcr.io/kserve/charts/kserve-crd \
+
+# Create the Istio IngressClass resource. KServe's RawDeployment mode creates
+# Kubernetes Ingress resources that reference an IngressClass. Without this
+# resource, the Ingress objects would have no controller to handle them.
+kubectl apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: istio
+spec:
+  controller: istio.io/ingress-controller
+EOF
+
+helm upgrade --install kserve-crd oci://ghcr.io/kserve/charts/kserve-crd \
   --namespace kserve \
   --create-namespace \
   --version v0.14.1 \
   --wait
 
-helm install kserve oci://ghcr.io/kserve/charts/kserve \
+helm upgrade --install kserve oci://ghcr.io/kserve/charts/kserve \
   --namespace kserve \
   --version v0.14.1 \
   --set kserve.controller.deploymentMode=RawDeployment \
-  --set kserve.controller.gateway.ingressGateway=istio-system/istio-ingressgateway \
+  --set kserve.controller.gateway.ingressGateway.className=istio \
   --wait
 
 echo "=== KServe installation complete ==="
