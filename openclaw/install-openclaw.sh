@@ -46,6 +46,17 @@ NAMESPACE="openclaw"
 # The token is printed at the end — save it for device pairing.
 GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN:-$(openssl rand -hex 16)}"
 
+# Accept an optional --values flag to specify which values file to use.
+# Defaults to values.yaml (Llama). Use values-qwen.yaml for Qwen.
+# Usage: bash install-openclaw.sh --values values-qwen.yaml
+VALUES_FILE=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --values) VALUES_FILE="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+
 echo "=== Installing OpenClaw ==="
 
 # -----------------------------------------------------------------------------
@@ -96,9 +107,20 @@ helm repo add openclaw https://serhanekicii.github.io/openclaw-helm
 helm repo update openclaw
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Use the specified values file, or default to values.yaml
+if [ -n "$VALUES_FILE" ]; then
+  # If it's a relative path, resolve it relative to the openclaw/ directory
+  if [[ "$VALUES_FILE" != /* ]]; then
+    VALUES_FILE="$SCRIPT_DIR/$VALUES_FILE"
+  fi
+else
+  VALUES_FILE="$SCRIPT_DIR/values.yaml"
+fi
+echo "Using values file: $VALUES_FILE"
+
 helm upgrade --install openclaw openclaw/openclaw \
   --namespace "$NAMESPACE" \
-  --values "$SCRIPT_DIR/values.yaml" \
+  --values "$VALUES_FILE" \
   --wait --timeout 5m
 
 echo ""

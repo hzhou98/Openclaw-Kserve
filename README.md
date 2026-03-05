@@ -72,6 +72,22 @@ exec -l $SHELL   # Restart shell to pick up PATH changes
 gcloud version
 ```
 
+After installing gcloud, you also need the **GKE auth plugin**. This plugin is required for `kubectl` to authenticate with GKE clusters. Without it, `kubectl` commands will fail with a `gke-gcloud-auth-plugin was not found` error.
+
+```bash
+# Install the GKE auth plugin
+gcloud components install gke-gcloud-auth-plugin
+
+# If gcloud was installed via a package manager (brew/apt), use that instead:
+# macOS (Homebrew)
+brew install google-cloud-sdk && gcloud components install gke-gcloud-auth-plugin
+# Linux (Debian/Ubuntu)
+sudo apt-get install google-cloud-cli-gke-gcloud-auth-plugin
+
+# Verify
+gke-gcloud-auth-plugin --version
+```
+
 #### 2. Authenticate
 
 Two authentications are needed — one for the gcloud CLI itself, and one for Terraform (which uses Application Default Credentials):
@@ -210,12 +226,14 @@ What each API does:
 # Check your T4 GPU quota in us-central1
 gcloud compute regions describe us-central1 \
   --project=openclaw-kserve-001 \
-  --format=json | grep -A3 NVIDIA_T4_GPUS
+  --format=json | grep -A5 '"metric": "NVIDIA_T4_GPUS"'
 
 # Expected output (limit > 0 means you're good):
 #   "metric": "NVIDIA_T4_GPUS",
 #   "limit": 2.0,
-#   "usage": 0.0
+#   "usage": 0.0,
+#   "owner": "..."
+# If "limit" is missing from the output, the quota is 0.
 ```
 
 If the limit is 0, request an increase:
@@ -287,12 +305,56 @@ gcloud services list --enabled | grep -E "compute|container|iam"
 # iamcredentials.googleapis.com
 
 # GPU quota
-gcloud compute regions describe us-central1 --format=json | grep -A3 NVIDIA_T4_GPUS
+gcloud compute regions describe us-central1 --format=json | grep -A5 '"metric": "NVIDIA_T4_GPUS"'
 # "limit": 2.0
 
 # Terraform
 cat terraform/terraform.tfvars               # project_id set correctly
 ```
+
+## Time Estimates
+
+### First-time deployment (end-to-end): ~25-40 minutes
+
+| Step | What happens | Time |
+|------|-------------|------|
+| **GCP setup** (`setup-gcp.sh`) | Auth, create project, enable APIs, check quota | ~3-5 min |
+| **GPU quota request** | Google reviews and approves your T4/L4 quota increase | Minutes to 48 hours* |
+| **Terraform init** | Downloads the Google provider plugin (~200MB) | ~1-2 min |
+| **Terraform apply — GKE cluster** | Provisions the Kubernetes control plane (API server, etcd, scheduler) | **~8-12 min** |
+| **Terraform apply — system pool** | Creates 1x e2-medium spot VM, installs kubelet | ~2-3 min |
+| **Terraform apply — GPU pool** | Creates pool definition (0 nodes initially, no VM yet) | ~1 min |
+| **cert-manager install** | Helm chart + wait for pods Ready | ~1-2 min |
+| **Istio install** | 3 Helm charts (base + istiod + gateway) + LoadBalancer IP | ~2-3 min |
+| **KServe install** | 2 Helm charts (CRDs + controller) | ~1-2 min |
+| **Model deploy — GPU scale-up** | GKE autoscaler provisions n1-standard-4 + T4 spot VM | **~3-5 min** |
+| **Model deploy — driver install** | GKE installs NVIDIA GPU drivers on the new node | ~1-2 min |
+| **Model deploy — download** | vLLM downloads Llama 3.2 3B from HuggingFace (~6GB) | ~1-3 min |
+| **Model deploy — load** | vLLM loads model weights into T4 GPU VRAM | ~1 min |
+| **OpenClaw install** | Helm chart + wait for pod Ready | ~1-2 min |
+| **Total** | | **~25-40 min** |
+
+*GPU quota for new accounts can take 24-48 hours. Established accounts are usually approved within minutes.
+
+### Subsequent operations
+
+| Operation | Time |
+|-----------|------|
+| Re-deploy after `terraform destroy` | ~20-30 min (full cycle) |
+| Re-deploy model only (GPU already has a node) | ~3-5 min (download + load) |
+| Re-deploy model (GPU scaled to zero, needs new node) | ~8-12 min (scale-up + download + load) |
+| `terraform destroy` (teardown cluster) | ~5-8 min |
+| `gcloud projects delete` (teardown project) | ~10 sec (async, resources stop immediately) |
+| Scale GPU to zero (delete InferenceService) | ~5-10 min (node drains and terminates) |
+| Helm upgrade (config change, no model reload) | ~1-2 min |
+
+### What takes the longest
+
+The two slowest steps are **GKE cluster creation** (~8-12 min) and **GPU node provisioning** (~3-5 min). Both involve GCP spinning up real VMs, which is why they're slow. Everything else is Helm installs that take 1-3 minutes each.
+
+If the GPU node takes longer than 5 minutes, check for:
+- Spot VM capacity issues (the zone may be out of spot T4s — try a different zone)
+- Quota exhaustion (`kubectl describe pod -n kserve <pod>` will show "insufficient quota" events)
 
 ## Quick Start
 
@@ -304,9 +366,10 @@ chmod +x setup-gcp.sh
 # 1. Set HuggingFace token (or edit kserve/hf-secret.yaml directly)
 export HF_TOKEN=hf_your_token_here
 
-# 2. Deploy everything (~15-25 min)
+# 2. Deploy everything (~25-40 min)
 chmod +x deploy.sh kserve/install-kserve.sh openclaw/install-openclaw.sh
-./deploy.sh
+./deploy.sh                # Uses Llama 3.2 3B (default)
+# ./deploy.sh --model qwen  # Use Qwen 3.5 2B if Llama license not approved
 ```
 
 ## File-by-File Explanation
@@ -443,7 +506,16 @@ kubectl get pods -n istio-system    # istiod-*, istio-ingressgateway-*
 kubectl get pods -n kserve          # kserve-controller-manager-*
 ```
 
-### Step 3: Deploy Llama 3.2 3B
+### Step 3: Deploy the LLM
+
+You have two model options:
+
+| Model | Params | VRAM | Gated? | Notes |
+|-------|--------|------|--------|-------|
+| **Llama 3.2 3B Instruct** (default) | 3B | ~6GB FP16 | Yes — must accept [Meta license](https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct) | Higher quality, larger community |
+| **Qwen 3.5 2B** (alternative) | 2B | ~4GB FP16 | No — open download | No license wait, faster inference, smaller |
+
+**Option A: Llama 3.2 3B (default)**
 
 ```bash
 # Edit the secret with your HF token
@@ -457,11 +529,38 @@ kubectl get inferenceservice -n kserve -w
 # Wait for READY=True (may take 5-8 min for GPU node + model download)
 ```
 
+**Option B: Qwen 3.5 2B (no license required)**
+
+Use this if you can't access Llama (license not approved, gated model issues, etc.).
+
+```bash
+# Edit the secret with your HF token (still needed to avoid rate limits)
+vim kserve/hf-secret.yaml
+
+kubectl apply -f kserve/hf-secret.yaml
+kubectl apply -f kserve/qwen-inferenceservice.yaml    # ← Qwen instead of Llama
+
+# Watch the deployment progress
+kubectl get inferenceservice -n kserve -w
+# Wait for READY=True
+```
+
+**Using deploy.sh with model selection:**
+
+```bash
+./deploy.sh                # Default: Llama 3.2 3B
+./deploy.sh --model qwen   # Alternative: Qwen 3.5 2B
+```
+
 ### Step 4: Deploy OpenClaw
 
 ```bash
+# For Llama (default):
 bash openclaw/install-openclaw.sh
 # Save the Gateway Token printed at the end!
+
+# For Qwen:
+bash openclaw/install-openclaw.sh --values values-qwen.yaml
 ```
 
 ### Step 5: Access OpenClaw
@@ -673,6 +772,68 @@ argocd app sync openclaw-stack
 # View diff before syncing:
 argocd app diff openclaw-stack
 ```
+
+## Stop and Start
+
+Use `stop.sh` and `start.sh` to pause and resume the cluster without a full teardown/redeploy cycle.
+
+### Stopping
+
+```bash
+./stop.sh              # Stop GPU only — delete model, system pool stays (~$0.01/hr)
+./stop.sh --all        # Stop everything — resize all pools to 0 nodes (~$0.00/hr)
+./stop.sh --destroy    # Destroy cluster entirely via Terraform ($0.00, needs full redeploy)
+```
+
+### Restarting
+
+```bash
+./start.sh              # Redeploy model only (after stop.sh)
+./start.sh --all        # Restart nodes + redeploy model (after stop.sh --all)
+./start.sh --model qwen # Restart with Qwen instead of Llama
+```
+
+### Stop/start comparison
+
+| Command | What happens | Hourly cost | Restart time |
+|---------|-------------|-------------|-------------|
+| `./stop.sh` | Model deleted, GPU scales to 0, system pool stays | ~$0.01 | ~5-10 min |
+| `./stop.sh --all` | All node pools resized to 0, control plane stays (free) | ~$0.00 | ~5-10 min |
+| `./stop.sh --destroy` | Cluster deleted entirely via Terraform | $0.00 | ~25-40 min (full deploy.sh) |
+
+### Typical daily workflow
+
+```bash
+# Morning: start working
+./start.sh                  # GPU node provisions, model loads (~5-10 min)
+
+# Evening: done for the day
+./stop.sh                   # GPU stops, saves ~$0.15/hr
+
+# Weekend: not using it at all
+./stop.sh --all             # Everything stops, saves ~$0.16/hr
+
+# Monday: back to work
+./start.sh --all            # Nodes + model restart (~5-10 min)
+```
+
+### How stop --all works
+
+When you run `./stop.sh --all`, the script:
+
+1. Deletes all InferenceServices (model pods stop, GPU node drains)
+2. Resizes `system-pool` to 0 nodes via `gcloud container clusters resize`
+3. Resizes `gpu-pool` to 0 nodes
+
+The GKE **control plane keeps running** (free for zonal clusters). All Kubernetes state is preserved — namespaces, secrets, Helm releases, ConfigMaps. They're stored in etcd on the control plane, not on worker nodes.
+
+When you run `./start.sh --all`:
+
+1. Resizes `system-pool` back to 1 node
+2. Waits for the node to become Ready
+3. Waits for system pods (Istio, KServe controller) to reschedule
+4. Re-applies the InferenceService (GPU node scales up, model loads)
+5. OpenClaw pod reschedules automatically and reconnects to the model
 
 ## Teardown
 

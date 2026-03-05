@@ -1,0 +1,74 @@
+# =============================================================================
+# KServe InferenceService — Qwen 3.5 2B (Alternative to Llama 3.2)
+# =============================================================================
+#
+# Use this manifest INSTEAD of llama-inferenceservice.yaml if:
+#   - You can't get access to Llama 3.2 (gated model, requires Meta license)
+#   - Your HuggingFace account hasn't been approved for Llama yet
+#   - You want a smaller model (2B vs 3B) that loads faster
+#
+# Qwen 3.5 2B advantages over Llama 3.2 3B:
+#   - NOT a gated model — no license acceptance or approval wait needed
+#   - Smaller (2B params, ~4GB VRAM in FP16 vs ~6GB for Llama 3B)
+#   - Faster inference due to fewer parameters
+#   - Still needs an HF token for authenticated downloads (rate limits)
+#
+# Qwen 3.5 2B disadvantages vs Llama 3.2 3B:
+#   - Slightly lower quality on complex reasoning (2B vs 3B)
+#   - Smaller community/ecosystem than Llama
+#
+# The endpoint is different from Llama:
+#   In-cluster: http://qwen-3-5-2b-predictor.kserve.svc.cluster.local/v1
+#
+# If you use this, also apply openclaw/values-qwen.yaml instead of values.yaml
+# when installing OpenClaw (so it points to the correct endpoint + model name).
+#
+# Usage:
+#   kubectl apply -f kserve/hf-secret.yaml
+#   kubectl apply -f kserve/qwen-inferenceservice.yaml   # instead of llama
+#   bash openclaw/install-openclaw.sh --values values-qwen.yaml
+#   # OR manually:
+#   helm upgrade --install openclaw openclaw/openclaw \
+#     -n openclaw -f openclaw/values-qwen.yaml
+# =============================================================================
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: qwen-3-5-2b
+  namespace: kserve
+spec:
+  predictor:
+    model:
+      modelFormat:
+        name: huggingface
+      runtime: kserve-huggingfaceserver
+      # Qwen 3.5 2B is NOT gated — no license acceptance needed.
+      # The HF_TOKEN is still useful to avoid download rate limits.
+      storageUri: "hf://Qwen/Qwen3.5-2B"
+      env:
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-secret
+              key: HF_TOKEN
+      # --max_model_len=8192: Same reasoning as Llama — limits KV-cache
+      # VRAM usage. Qwen 3.5 2B supports up to 32K context but we cap
+      # at 8192 to stay well within T4's 16GB VRAM.
+      args:
+        - "--max_model_len=8192"
+      resources:
+        limits:
+          cpu: "4"
+          memory: 16Gi
+          nvidia.com/gpu: "1"
+        requests:
+          cpu: "2"
+          memory: 8Gi
+          nvidia.com/gpu: "1"
+    tolerations:
+      - key: nvidia.com/gpu
+        operator: Equal
+        value: present
+        effect: NoSchedule
+    nodeSelector:
+      pool: gpu

@@ -36,8 +36,54 @@ set -euo pipefail
 # it's invoked from. All file references use $ROOT_DIR for portability.
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# =============================================================================
+# Model selection
+# =============================================================================
+# Supports two models:
+#   llama (default) — meta-llama/Llama-3.2-3B-Instruct (gated, needs license)
+#   qwen           — Qwen/Qwen3.5-2B (open, no license needed)
+#
+# Usage:
+#   ./deploy.sh               # Deploy with Llama 3.2 3B (default)
+#   ./deploy.sh --model qwen  # Deploy with Qwen 3.5 2B
+# =============================================================================
+MODEL="llama"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --model)
+      MODEL="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown option: $1"
+      echo "Usage: ./deploy.sh [--model llama|qwen]"
+      exit 1
+      ;;
+  esac
+done
+
+case "$MODEL" in
+  llama)
+    ISVC_FILE="$ROOT_DIR/kserve/llama-inferenceservice.yaml"
+    ISVC_NAME="llama-3-2b"
+    OPENCLAW_VALUES="$ROOT_DIR/openclaw/values.yaml"
+    MODEL_DISPLAY="Llama 3.2 3B Instruct"
+    ;;
+  qwen)
+    ISVC_FILE="$ROOT_DIR/kserve/qwen-inferenceservice.yaml"
+    ISVC_NAME="qwen-3-5-2b"
+    OPENCLAW_VALUES="$ROOT_DIR/openclaw/values-qwen.yaml"
+    MODEL_DISPLAY="Qwen 3.5 2B"
+    ;;
+  *)
+    echo "ERROR: Unknown model '$MODEL'. Use 'llama' or 'qwen'."
+    exit 1
+    ;;
+esac
+
 echo "============================================"
 echo "  OpenClaw + KServe Deployment"
+echo "  Model: $MODEL_DISPLAY"
 echo "============================================"
 echo ""
 
@@ -157,12 +203,12 @@ bash "$ROOT_DIR/kserve/install-kserve.sh"
 # can be installed in the meantime.
 # =============================================================================
 echo ""
-echo "=== Step 3: Deploying Llama 3.2 3B ==="
+echo "=== Step 3: Deploying $MODEL_DISPLAY ==="
 kubectl apply -f "$ROOT_DIR/kserve/hf-secret.yaml"
-kubectl apply -f "$ROOT_DIR/kserve/llama-inferenceservice.yaml"
+kubectl apply -f "$ISVC_FILE"
 
 echo "Waiting for InferenceService to become ready (this may take several minutes as GPU node scales up)..."
-kubectl wait --for=condition=Ready inferenceservice/llama-3-2b -n kserve --timeout=600s || {
+kubectl wait --for=condition=Ready "inferenceservice/$ISVC_NAME" -n kserve --timeout=600s || {
   echo "WARNING: InferenceService not ready within 10 minutes."
   echo "Check status: kubectl get inferenceservice -n kserve"
   echo "Check pods: kubectl get pods -n kserve"
@@ -182,7 +228,7 @@ kubectl wait --for=condition=Ready inferenceservice/llama-3-2b -n kserve --timeo
 # =============================================================================
 echo ""
 echo "=== Step 4: Installing OpenClaw ==="
-bash "$ROOT_DIR/openclaw/install-openclaw.sh"
+bash "$ROOT_DIR/openclaw/install-openclaw.sh" --values "$OPENCLAW_VALUES"
 
 echo ""
 echo "============================================"

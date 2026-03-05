@@ -1,0 +1,47 @@
+# =============================================================================
+# OpenClaw Helm Values — Configured for KServe-hosted Qwen 3.5 2B
+# =============================================================================
+#
+# Use this instead of values.yaml when deploying with Qwen 3.5 2B
+# (kserve/qwen-inferenceservice.yaml) instead of Llama 3.2 3B.
+#
+# The only differences from values.yaml:
+#   - OPENAI_API_BASE points to qwen-3-5-2b-predictor (not llama-3-2b-predictor)
+#   - LLM_MODEL is Qwen/Qwen3.5-2B (not meta-llama/Llama-3.2-3B-Instruct)
+# =============================================================================
+app-template:
+  controllers:
+    main:
+      containers:
+        main:
+          env:
+            # Points to the Qwen InferenceService's in-cluster Service.
+            # KServe names the Service <isvc-name>-predictor, so for
+            # InferenceService "qwen-3-5-2b" it becomes "qwen-3-5-2b-predictor".
+            OPENAI_API_BASE: "http://qwen-3-5-2b-predictor.kserve.svc.cluster.local/v1"
+            OPENAI_API_KEY: "dummy"
+            # Must match the model name vLLM registers — verify with:
+            #   curl http://qwen-3-5-2b-predictor.kserve.svc.cluster.local/v1/models
+            LLM_MODEL: "Qwen/Qwen3.5-2B"
+          envFrom:
+            - secretRef:
+                name: openclaw-env-secret
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+
+  service:
+    main:
+      ports:
+        http:
+          port: 18789
+
+  persistence:
+    data:
+      enabled: true
+      size: 5Gi
+      accessMode: ReadWriteOnce
