@@ -103,6 +103,52 @@ gcloud config get-value project
 # Output: openclaw-kserve-001
 ```
 
+**Creating the project under an existing organization:**
+
+If your GCP account belongs to a company or institution (Google Workspace, Cloud Identity), you likely have an organization. Projects created under an org inherit its IAM policies, billing constraints, and security controls.
+
+```bash
+# List your organizations
+gcloud organizations list
+# ID            DISPLAY_NAME       DIRECTORY_CUSTOMER_ID
+# 123456789012  My Company Inc     C0xxxxxxx
+
+# List folders within the org (if any — folders are optional sub-groupings)
+gcloud resource-manager folders list --organization=123456789012
+# ID              DISPLAY_NAME    PARENT
+# 111111111111    Engineering     organizations/123456789012
+# 222222222222    Research        organizations/123456789012
+
+# Create project directly under the organization
+gcloud projects create openclaw-kserve-001 \
+  --name="OpenClaw KServe" \
+  --organization=123456789012
+
+# OR create project under a specific folder within the org
+gcloud projects create openclaw-kserve-001 \
+  --name="OpenClaw KServe" \
+  --folder=222222222222
+
+# Set as active project
+gcloud config set project openclaw-kserve-001
+```
+
+**Organization vs no-organization:**
+
+| | No Organization | Under Organization |
+|---|---|---|
+| **Who** | Personal Gmail accounts | Google Workspace / Cloud Identity |
+| **Project location** | Standalone (no parent) | Nested under org or folder |
+| **IAM inheritance** | None | Org-level policies apply to all projects |
+| **Billing** | Any billing account | May be restricted to org billing accounts |
+| **Quotas** | Per-project defaults | May inherit org-level quota overrides |
+| **Security** | Self-managed | Org admins can enforce constraints (e.g., allowed regions, required labels) |
+
+**Common issues with org-managed projects:**
+- **Organization Policy constraints** may block certain actions (e.g., creating external IPs, using spot VMs, enabling specific APIs). If you get "constraint violated" errors, contact your org admin.
+- **Billing restrictions** — some orgs only allow linking to specific billing accounts. Check with your admin if `gcloud billing projects link` fails.
+- **Permissions** — you need the `resourcemanager.projects.create` permission on the org or folder. If denied, ask your org admin to create the project for you or grant you the Project Creator role.
+
 **Tip**: Use a dedicated project so you can see all costs in one place and tear everything down cleanly.
 
 #### 4. Link a billing account
@@ -164,7 +210,12 @@ What each API does:
 # Check your T4 GPU quota in us-central1
 gcloud compute regions describe us-central1 \
   --project=openclaw-kserve-001 \
-  --format="table(quotas.filter(metric:NVIDIA_T4_GPUS).limit, quotas.filter(metric:NVIDIA_T4_GPUS).usage)"
+  --format=json | grep -A3 NVIDIA_T4_GPUS
+
+# Expected output (limit > 0 means you're good):
+#   "metric": "NVIDIA_T4_GPUS",
+#   "limit": 2.0,
+#   "usage": 0.0
 ```
 
 If the limit is 0, request an increase:
@@ -236,7 +287,7 @@ gcloud services list --enabled | grep -E "compute|container|iam"
 # iamcredentials.googleapis.com
 
 # GPU quota
-gcloud compute regions describe us-central1 --format="json(quotas)" | grep -A2 NVIDIA_T4
+gcloud compute regions describe us-central1 --format=json | grep -A3 NVIDIA_T4_GPUS
 # "limit": 2.0
 
 # Terraform

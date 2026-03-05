@@ -145,8 +145,72 @@ if [[ "${CREATE_NEW,,}" != "n" ]]; then
   read -p "Project ID [$DEFAULT_PROJECT_ID]: " PROJECT_ID
   PROJECT_ID="${PROJECT_ID:-$DEFAULT_PROJECT_ID}"
 
+  # ---------------------------------------------------------------------------
+  # Check for GCP organizations
+  # ---------------------------------------------------------------------------
+  # If your Google account belongs to a company/institution (Google Workspace
+  # or Cloud Identity), you'll have an organization. Projects created under
+  # an org inherit IAM policies, billing constraints, and security controls.
+  #
+  # Hierarchy: Organization → Folders (optional) → Projects → Resources
+  #
+  # If no org exists (personal Gmail), the project is created standalone.
+  # ---------------------------------------------------------------------------
+  CREATE_FLAGS="--name=OpenClaw KServe --set-as-default"
+  ORG_LIST=$(gcloud organizations list --format="value(ID,DISPLAY_NAME)" 2>/dev/null || true)
+
+  if [ -n "$ORG_LIST" ]; then
+    echo ""
+    echo "Organizations found:"
+    echo "$ORG_LIST" | while IFS=$'\t' read -r ORG_ID ORG_NAME; do
+      echo "  $ORG_ID  ($ORG_NAME)"
+    done
+    echo ""
+
+    ORG_COUNT=$(echo "$ORG_LIST" | wc -l | tr -d ' ')
+    if [ "$ORG_COUNT" -eq 1 ]; then
+      DEFAULT_ORG_ID=$(echo "$ORG_LIST" | head -1 | cut -f1)
+    else
+      DEFAULT_ORG_ID=""
+    fi
+
+    read -p "Create project under an organization? (Y/n): " USE_ORG
+    if [[ "${USE_ORG,,}" != "n" ]]; then
+      if [ -n "$DEFAULT_ORG_ID" ]; then
+        read -p "Organization ID [$DEFAULT_ORG_ID]: " ORG_ID
+        ORG_ID="${ORG_ID:-$DEFAULT_ORG_ID}"
+      else
+        read -p "Organization ID: " ORG_ID
+      fi
+
+      # Check for folders within the organization
+      FOLDER_LIST=$(gcloud resource-manager folders list --organization="$ORG_ID" \
+        --format="value(ID,DISPLAY_NAME)" 2>/dev/null || true)
+
+      if [ -n "$FOLDER_LIST" ]; then
+        echo ""
+        echo "Folders in organization $ORG_ID:"
+        echo "$FOLDER_LIST" | while IFS=$'\t' read -r FOLDER_ID FOLDER_NAME; do
+          echo "  $FOLDER_ID  ($FOLDER_NAME)"
+        done
+        echo ""
+
+        read -p "Create project under a folder? (y/N): " USE_FOLDER
+        if [[ "${USE_FOLDER,,}" == "y" ]]; then
+          read -p "Folder ID: " FOLDER_ID
+          CREATE_FLAGS="--name=OpenClaw KServe --folder=$FOLDER_ID --set-as-default"
+        else
+          CREATE_FLAGS="--name=OpenClaw KServe --organization=$ORG_ID --set-as-default"
+        fi
+      else
+        CREATE_FLAGS="--name=OpenClaw KServe --organization=$ORG_ID --set-as-default"
+      fi
+    fi
+  fi
+
   echo "Creating project: $PROJECT_ID"
-  gcloud projects create "$PROJECT_ID" --name="OpenClaw KServe" --set-as-default
+  # shellcheck disable=SC2086
+  gcloud projects create "$PROJECT_ID" $CREATE_FLAGS
 
   echo "Project created successfully."
 else
@@ -308,19 +372,18 @@ echo ""
 echo "=== Step 5: GPU Quota Check ==="
 echo ""
 
-# Check T4 GPU quota in the target region
+# Check T4 GPU quota in the target region.
+# We output JSON and extract the NVIDIA_T4_GPUS quota using grep + awk.
+# This avoids a Python dependency.
 T4_QUOTA=$(gcloud compute regions describe us-central1 \
   --project="$PROJECT_ID" \
-  --format="json(quotas)" 2>/dev/null | \
-  python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-for q in data.get('quotas', []):
-    if q['metric'] == 'NVIDIA_T4_GPUS':
-        print(f\"{int(q['limit'])}|{int(q['usage'])}\")
-        sys.exit(0)
-print('0|0')
-" 2>/dev/null || echo "0|0")
+  --format=json 2>/dev/null | \
+  awk '
+    /"metric": "NVIDIA_T4_GPUS"/ { found=1 }
+    found && /"limit"/ { gsub(/[^0-9.]/, "", $2); limit=$2 }
+    found && /"usage"/ { gsub(/[^0-9.]/, "", $2); usage=$2; printf "%d|%d\n", limit, usage; exit }
+    END { if (!found) print "0|0" }
+  ' 2>/dev/null || echo "0|0")
 
 T4_LIMIT=$(echo "$T4_QUOTA" | cut -d'|' -f1)
 T4_USAGE=$(echo "$T4_QUOTA" | cut -d'|' -f2)
