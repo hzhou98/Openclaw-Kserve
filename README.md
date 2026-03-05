@@ -675,6 +675,30 @@ All nodes use spot instances. The GPU pool scales to zero when idle.
 | InferenceService stuck | `kubectl get events -n kserve --sort-by='.lastTimestamp'` | Check resource limits, node taints |
 | OpenClaw can't reach model | `kubectl logs -n openclaw <pod>` | Verify OPENAI_API_BASE URL matches the Service name |
 
+## Q&A
+
+### Why does `install-kserve.sh` delete webhooks before installing?
+
+There are two separate webhook deletion steps, each solving a different problem.
+
+**Istio webhook deletion (before `istio-base` install):**
+
+When istiod starts, it continuously reconciles the `istiod-default-validator` ValidatingWebhookConfiguration, claiming server-side apply ownership of fields like `.failurePolicy`. On re-runs, Helm tries to update the same webhook via the `istio-base` chart, but the API server rejects it because istiod's field manager (`pilot-discovery`) owns those fields. Deleting the webhook before the upgrade gives Helm a clean slate — it recreates the webhook with itself as owner. istiod will reconcile it again afterwards, but the Helm install succeeds without conflict.
+
+**KServe webhook deletions (before `kserve-crd` and before `kserve` install):**
+
+*First deletion (before `kserve-crd`):* The kserve-crd chart creates ValidatingWebhookConfigurations that point at the kserve-webhook-server-service. But the webhook server pod comes from the `kserve` chart, which hasn't installed yet. When Helm tries to create ClusterServingRuntime resources, the API server forwards the admission request to the webhook, gets no response (no pod running), and the install fails. Deleting the webhooks removes this chicken-and-egg problem.
+
+*Second deletion (between `kserve-crd` and `kserve`):* The kserve-crd chart just recreated the ModelMesh webhook. cert-manager-cainjector immediately injects its CA bundle into `.clientConfig.caBundle`, claiming server-side apply ownership of that field. When Helm then tries to install the `kserve` chart (which also manages that webhook), it conflicts with cert-manager's field manager. Since we use RawDeployment mode (not ModelMesh), this webhook is unnecessary and safe to delete.
+
+### Why not use Helm annotations to adopt the resources instead of deleting them?
+
+The original approach was to annotate the webhooks with `meta.helm.sh/release-name` and `meta.helm.sh/release-namespace` to tell Helm "this resource belongs to your release." This doesn't work for istiod because pilot-discovery immediately reclaims field ownership after the annotation is set. Deletion is the reliable fix because the controllers (istiod, KServe) recreate their webhooks once they're running — the deletions just create a clean window for Helm to install without field ownership conflicts.
+
+### Why can't `--force` or `--force-replace` fix the conflict?
+
+Helm's `--force` flag (deprecated alias for `--force-replace`) tells Helm to delete and recreate changed resources. However, this flag is incompatible with server-side apply — Helm rejects the combination with the error `"cannot use server-side apply and force replace together"`. The solution is to remove the conflicting resource (the webhook) before the install, rather than trying to force through the conflict.
+
 ## Helm Chart (Alternative to Scripts)
 
 The `helm-chart/` directory packages the model + OpenClaw as a single Helm release, making it easier to manage, upgrade, and roll back.
