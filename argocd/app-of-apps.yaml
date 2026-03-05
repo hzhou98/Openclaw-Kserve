@@ -33,7 +33,7 @@ spec:
   project: default
   source:
     # UPDATE THIS to your Git repository URL
-    repoURL: https://github.com/YOUR_USERNAME/Openclaw-Kserve.git
+    repoURL: https://github.com/hzhou98/Openclaw-Kserve.git
     targetRevision: main
     path: argocd/apps    # Directory containing child Application manifests
   destination:
