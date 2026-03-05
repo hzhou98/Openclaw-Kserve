@@ -120,10 +120,12 @@ helm repo update istio
 # upgrade — the istio-base Helm chart recreates it with Helm as owner.
 # istiod will still reconcile it afterwards, but the initial install
 # succeeds without conflict.
-if kubectl get validatingwebhookconfiguration istiod-default-validator &>/dev/null; then
-  echo "  Deleting istiod-default-validator to avoid field ownership conflict..."
-  kubectl delete validatingwebhookconfiguration istiod-default-validator
-fi
+for webhook in istiod-default-validator istio-validator-istio-system; do
+  if kubectl get validatingwebhookconfiguration "$webhook" &>/dev/null; then
+    echo "  Deleting $webhook to avoid field ownership conflict..."
+    kubectl delete validatingwebhookconfiguration "$webhook"
+  fi
+done
 
 helm upgrade --install istio-base istio/base \
   --namespace istio-system \
@@ -170,6 +172,35 @@ helm upgrade --install istio-ingressgateway istio/gateway \
 # Version v0.14.1 is pinned for reproducibility.
 # -----------------------------------------------------------------------------
 echo "--- Installing KServe ---"
+
+# Delete KServe validating webhooks to avoid chicken-and-egg failures.
+#
+# The kserve-crd chart creates ValidatingWebhookConfigurations that point
+# to the kserve-webhook-server-service. But during initial install (or
+# re-install), the webhook server pod from the kserve chart isn't running
+# yet. When Helm then tries to create ClusterServingRuntime resources, the
+# API server calls the webhook, which has no endpoints, and the install
+# fails. Deleting these webhooks lets Helm create the resources unvalidated.
+# The KServe controller recreates the webhooks once it's running.
+#
+# Also deletes the ModelMesh webhook — we don't run ModelMesh (we use
+# RawDeployment mode), so its certs are never provisioned and it rejects
+# all ServingRuntime mutations with "unable to parse bytes as PEM block".
+KSERVE_WEBHOOKS=(
+  clusterservingruntime.serving.kserve.io
+  inferenceservice.serving.kserve.io
+  inferencegraph.serving.kserve.io
+  localmodelcache.serving.kserve.io
+  servingruntime.serving.kserve.io
+  trainedmodel.serving.kserve.io
+  modelmesh-servingruntime.serving.kserve.io
+)
+for webhook in "${KSERVE_WEBHOOKS[@]}"; do
+  if kubectl get validatingwebhookconfiguration "$webhook" &>/dev/null; then
+    echo "  Deleting $webhook webhook..."
+    kubectl delete validatingwebhookconfiguration "$webhook"
+  fi
+done
 
 # Create the Istio IngressClass resource. KServe's RawDeployment mode creates
 # Kubernetes Ingress resources that reference an IngressClass. Without this
