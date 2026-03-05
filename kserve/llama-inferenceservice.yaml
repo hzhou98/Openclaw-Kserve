@@ -1,0 +1,100 @@
+# =============================================================================
+# KServe InferenceService — Llama 3.2 3B Instruct
+# =============================================================================
+#
+# This manifest tells KServe to deploy a vLLM server hosting Meta's
+# Llama 3.2 3B Instruct model. Once deployed, the model is accessible as
+# an OpenAI-compatible API at:
+#
+#   In-cluster:  http://llama-3-2b-predictor.kserve.svc.cluster.local/v1
+#   External:    http://<istio-ingress-ip>/v1 (with Host header)
+#
+# The OpenClaw application calls /v1/chat/completions on this endpoint,
+# just like it would call the OpenAI or Anthropic API.
+#
+# Model choice:
+#   Llama 3.2 3B Instruct is chosen because:
+#   - 3B parameters fits comfortably in T4's 16GB VRAM (~6GB in FP16)
+#   - Instruct-tuned for chat/agent use cases (follows instructions well)
+#   - Open-weight with permissive license (Meta Community License)
+#   - Note: There is no "2B" variant; the Llama 3.2 sizes are 1B and 3B.
+#     The project name says "2B" but we use 3B as the closest practical size.
+#
+# How it works:
+#   1. KServe controller sees this InferenceService and creates a Deployment
+#   2. The Deployment runs the kserve-huggingfaceserver container (vLLM)
+#   3. vLLM downloads the model from HuggingFace using the HF_TOKEN secret
+#   4. vLLM loads the model onto the T4 GPU and starts an HTTP server
+#   5. KServe creates a Service (llama-3-2b-predictor) for routing
+# =============================================================================
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: llama-3-2b
+  namespace: kserve
+spec:
+  predictor:
+    model:
+      # modelFormat "huggingface" tells KServe to use the HuggingFace/vLLM
+      # serving runtime, which provides an OpenAI-compatible API out of the box.
+      modelFormat:
+        name: huggingface
+      # The runtime image that KServe will use. kserve-huggingfaceserver
+      # bundles vLLM and exposes /v1/chat/completions, /v1/completions,
+      # /v1/models endpoints — fully compatible with the OpenAI SDK.
+      runtime: kserve-huggingfaceserver
+      # storageUri with "hf://" prefix tells KServe to download the model
+      # directly from HuggingFace Hub. The model weights (~6GB) are downloaded
+      # at pod startup and cached on the node's disk.
+      storageUri: "hf://meta-llama/Llama-3.2-3B-Instruct"
+      # Environment variable injected into the vLLM container.
+      # HF_TOKEN is needed because Llama 3.2 is a gated model — you must
+      # accept Meta's license on HuggingFace before downloading.
+      env:
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-secret    # References kserve/hf-secret.yaml
+              key: HF_TOKEN
+      # Arguments passed to the vLLM engine.
+      # --max_model_len=8192: Limits the maximum sequence length (input +
+      # output tokens). The default would try to use the model's full
+      # context length (128K for Llama 3.2), which requires more VRAM for
+      # the KV-cache than the T4 has. 8192 tokens is plenty for agent
+      # interactions and keeps VRAM usage within the T4's 16GB.
+      args:
+        - "--max_model_len=8192"
+      # Resource requests and limits for the vLLM container.
+      # requests: What the scheduler guarantees (used for scheduling decisions)
+      # limits: Hard cap the container cannot exceed
+      #
+      # GPU: nvidia.com/gpu must be set in BOTH requests and limits.
+      # Setting it to "1" claims one T4 GPU exclusively for this pod.
+      #
+      # Memory: 16Gi limit because vLLM uses system RAM for:
+      #   - Model weight loading before GPU transfer
+      #   - Request queuing and batching
+      #   - Tokenization
+      # The model weights themselves live in GPU VRAM, not system RAM.
+      resources:
+        limits:
+          cpu: "4"
+          memory: 16Gi
+          nvidia.com/gpu: "1"
+        requests:
+          cpu: "2"
+          memory: 8Gi
+          nvidia.com/gpu: "1"
+    # Toleration allows this pod to schedule on GPU nodes that have the
+    # nvidia.com/gpu=present:NoSchedule taint (set in terraform/main.tf).
+    # Without this toleration, the pod would be rejected by GPU nodes.
+    tolerations:
+      - key: nvidia.com/gpu
+        operator: Equal
+        value: present
+        effect: NoSchedule
+    # nodeSelector ensures this pod ONLY runs on nodes labeled pool=gpu.
+    # Combined with the toleration above, this guarantees the model pod
+    # lands on a GPU node and triggers the GPU pool to scale up from zero.
+    nodeSelector:
+      pool: gpu

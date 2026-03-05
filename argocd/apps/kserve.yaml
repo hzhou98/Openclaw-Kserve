@@ -1,0 +1,63 @@
+# =============================================================================
+# ArgoCD Application — KServe (CRDs + Controller)
+# =============================================================================
+#
+# Installs KServe in RawDeployment mode. Two separate Applications because
+# CRDs must exist before the controller can start watching for them.
+#
+# Sync wave -1 ensures KServe installs after Istio but before the model.
+# =============================================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kserve-crd
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: ghcr.io/kserve/charts
+    chart: kserve-crd
+    targetRevision: v0.14.1
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kserve
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kserve-controller
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: ghcr.io/kserve/charts
+    chart: kserve
+    targetRevision: v0.14.1
+    helm:
+      values: |
+        kserve:
+          controller:
+            deploymentMode: RawDeployment
+            gateway:
+              ingressGateway: istio-system/istio-ingressgateway
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kserve
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

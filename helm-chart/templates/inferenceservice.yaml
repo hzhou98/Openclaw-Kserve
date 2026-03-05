@@ -1,0 +1,49 @@
+{{- /*
+  KServe InferenceService for Llama 3.2
+  Creates a vLLM-based model server with OpenAI-compatible API endpoints.
+
+  The Service created by KServe will be named:
+    {{ .Release.Name }}-predictor.{{ .Values.kserveNamespace }}.svc.cluster.local
+
+  But since the InferenceService name is hardcoded to "llama-3-2b", the
+  Service name will be: llama-3-2b-predictor
+*/ -}}
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: llama-3-2b
+  namespace: {{ .Values.kserveNamespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: openclaw-kserve
+spec:
+  predictor:
+    model:
+      modelFormat:
+        name: huggingface
+      runtime: kserve-huggingfaceserver
+      storageUri: "hf://{{ .Values.model.name }}"
+      env:
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-secret
+              key: HF_TOKEN
+      args:
+        - "--max_model_len={{ .Values.model.maxModelLen }}"
+      resources:
+        limits:
+          cpu: {{ .Values.model.resources.limits.cpu | quote }}
+          memory: {{ .Values.model.resources.limits.memory }}
+          nvidia.com/gpu: {{ .Values.model.resources.limits.gpu | quote }}
+        requests:
+          cpu: {{ .Values.model.resources.requests.cpu | quote }}
+          memory: {{ .Values.model.resources.requests.memory }}
+          nvidia.com/gpu: {{ .Values.model.resources.requests.gpu | quote }}
+    tolerations:
+      - key: nvidia.com/gpu
+        operator: Equal
+        value: present
+        effect: NoSchedule
+    nodeSelector:
+      pool: gpu

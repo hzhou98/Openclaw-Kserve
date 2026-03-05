@@ -1,0 +1,45 @@
+# =============================================================================
+# ArgoCD Application — cert-manager
+# =============================================================================
+#
+# Installs cert-manager from its official Helm chart. This is the first
+# component in the dependency chain:
+#   cert-manager → Istio → KServe → Model → OpenClaw
+#
+# ArgoCD will:
+#   1. Pull the cert-manager Helm chart from the Jetstack repo
+#   2. Install it in the cert-manager namespace with CRDs enabled
+#   3. Continuously monitor for drift and self-heal
+#
+# Sync wave -4 ensures this installs before everything else.
+# (Lower wave number = installed first)
+# =============================================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+  annotations:
+    # Sync waves control installation order. -4 = first to install.
+    argocd.argoproj.io/sync-wave: "-4"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://charts.jetstack.io
+    chart: cert-manager
+    targetRevision: v1.16.3
+    helm:
+      values: |
+        crds:
+          enabled: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

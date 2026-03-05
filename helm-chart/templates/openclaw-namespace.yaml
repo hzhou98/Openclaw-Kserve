@@ -1,0 +1,11 @@
+{{- /*
+  OpenClaw namespace — created explicitly so it exists before the secret
+  and Helm subchart try to use it.
+*/ -}}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.openclawNamespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: openclaw-kserve

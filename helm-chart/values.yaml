@@ -1,0 +1,80 @@
+# =============================================================================
+# Helm Chart Values — OpenClaw KServe Stack
+# =============================================================================
+#
+# These values control the KServe InferenceService and OpenClaw configuration.
+# Override them with --set flags or a custom values file.
+#
+# Examples:
+#
+#   # Minimal: just set the required secrets
+#   helm install openclaw-stack ./helm-chart \
+#     --set hfToken=hf_abc123 \
+#     --set gatewayToken=mysecrettoken
+#
+#   # Custom model (e.g., smaller 1B variant for lower cost)
+#   helm install openclaw-stack ./helm-chart \
+#     --set hfToken=hf_abc123 \
+#     --set gatewayToken=mysecrettoken \
+#     --set model.name=meta-llama/Llama-3.2-1B-Instruct \
+#     --set model.maxModelLen=16384
+#
+#   # Increase GPU memory (if using a larger GPU like A100)
+#   helm install openclaw-stack ./helm-chart \
+#     --set hfToken=hf_abc123 \
+#     --set model.resources.limits.memory=32Gi \
+#     --set model.maxModelLen=32768
+#
+#   # Production: use a dedicated namespace
+#   helm install openclaw-stack ./helm-chart \
+#     --namespace production \
+#     --create-namespace \
+#     --set hfToken=hf_abc123 \
+#     --set gatewayToken=prod-token-here
+# =============================================================================
+
+# HuggingFace access token (REQUIRED)
+# Get one at: https://huggingface.co/settings/tokens
+# Must have accepted the model's license first
+hfToken: ""
+
+# OpenClaw gateway token for device pairing (REQUIRED)
+# Used to authenticate when connecting browsers/messaging apps
+gatewayToken: ""
+
+# Namespace for KServe resources (InferenceService, secrets)
+kserveNamespace: kserve
+
+# Namespace for OpenClaw resources
+openclawNamespace: openclaw
+
+# Model configuration
+model:
+  # HuggingFace model ID — must match a model you have access to
+  name: "meta-llama/Llama-3.2-3B-Instruct"
+  # Maximum sequence length (input + output tokens)
+  # Lower = less VRAM for KV-cache. 8192 fits easily on T4 (16GB)
+  # Increase if you need longer conversations (but watch VRAM usage)
+  maxModelLen: 8192
+  # GPU and compute resources for the vLLM container
+  resources:
+    requests:
+      cpu: "2"
+      memory: 8Gi
+      gpu: "1"
+    limits:
+      cpu: "4"
+      memory: 16Gi
+      gpu: "1"
+
+# OpenClaw application configuration
+openclaw:
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  persistence:
+    size: 5Gi

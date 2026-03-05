@@ -1,0 +1,27 @@
+# =============================================================================
+# Helm Chart Metadata — OpenClaw KServe Stack
+# =============================================================================
+#
+# This is a "umbrella" Helm chart that packages the KServe InferenceService
+# and HuggingFace secret together. It does NOT include the KServe controller
+# or Istio (those are infrastructure and installed separately).
+#
+# This chart deploys:
+#   - HuggingFace token Secret (for gated model access)
+#   - KServe InferenceService (Llama 3.2 3B via vLLM)
+#   - OpenClaw namespace, secret, and Helm release (as a subchart dependency)
+#
+# Usage:
+#   helm install openclaw-stack ./helm-chart \
+#     --set hfToken=hf_xxx \
+#     --set gatewayToken=my-secret-token
+#
+# Or with a values file:
+#   helm install openclaw-stack ./helm-chart -f my-values.yaml
+# =============================================================================
+apiVersion: v2
+name: openclaw-kserve
+description: OpenClaw AI agent with KServe-hosted Llama 3.2 3B model
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

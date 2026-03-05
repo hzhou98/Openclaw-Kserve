@@ -1,0 +1,49 @@
+# =============================================================================
+# ArgoCD App-of-Apps — Master Application
+# =============================================================================
+#
+# This is the "app-of-apps" pattern: a single ArgoCD Application that manages
+# other ArgoCD Applications. You apply this ONE manifest, and ArgoCD
+# automatically creates and syncs all child applications.
+#
+# Why app-of-apps?
+#   - Single entry point: apply one YAML, get the entire stack
+#   - Dependency ordering: child apps can depend on each other
+#   - GitOps: all app definitions live in the same repo
+#   - Self-managing: ArgoCD watches the argocd/ directory for changes
+#
+# Usage:
+#   1. Install ArgoCD in the cluster (see install-argocd.sh)
+#   2. Push this repo to a Git remote (GitHub, GitLab, etc.)
+#   3. Apply this manifest:
+#      kubectl apply -f argocd/app-of-apps.yaml
+#   4. ArgoCD syncs all child applications automatically
+#
+# IMPORTANT: Update repoURL below to point to YOUR Git repository.
+# =============================================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: openclaw-stack
+  namespace: argocd
+  # Finalizer ensures ArgoCD cleans up child apps when this app is deleted
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    # UPDATE THIS to your Git repository URL
+    repoURL: https://github.com/YOUR_USERNAME/Openclaw-Kserve.git
+    targetRevision: main
+    path: argocd/apps    # Directory containing child Application manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      # prune: delete resources that no longer exist in Git
+      prune: true
+      # selfHeal: revert manual changes made outside of Git
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
