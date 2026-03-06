@@ -91,6 +91,7 @@ resource "google_container_cluster" "primary" {
   # We define our own node pools below for full control over config.
   remove_default_node_pool = true
   initial_node_count       = 1
+  deletion_protection      = false
 
   # REGULAR release channel: receives GKE updates after RAPID channel,
   # providing a balance of new features and stability. This ensures
