@@ -186,6 +186,9 @@ echo "--- Installing KServe ---"
 # Also deletes the ModelMesh webhook — we don't run ModelMesh (we use
 # RawDeployment mode), so its certs are never provisioned and it rejects
 # all ServingRuntime mutations with "unable to parse bytes as PEM block".
+
+sleep 120 # Wait a bit for any existing webhooks to be created before deleting
+
 KSERVE_WEBHOOKS=(
   clusterservingruntime.serving.kserve.io
   inferenceservice.serving.kserve.io
