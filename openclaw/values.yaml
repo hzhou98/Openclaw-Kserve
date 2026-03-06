@@ -57,7 +57,10 @@ app-template:
           {
             "gateway": {
               "port": 18789,
-              "mode": "local"
+              "mode": "local",
+              "controlUi": {
+                "dangerouslyAllowHostHeaderOriginFallback": true
+              }
             },
             "models": {
               "mode": "merge",

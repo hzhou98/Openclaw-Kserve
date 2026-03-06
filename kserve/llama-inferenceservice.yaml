@@ -43,10 +43,6 @@ spec:
       # bundles vLLM and exposes /v1/chat/completions, /v1/completions,
       # /v1/models endpoints — fully compatible with the OpenAI SDK.
       runtime: kserve-huggingfaceserver
-      # storageUri with "hf://" prefix tells KServe to download the model
-      # directly from HuggingFace Hub. The model weights (~6GB) are downloaded
-      # at pod startup and cached on the node's disk.
-      storageUri: "hf://meta-llama/Llama-3.2-3B-Instruct"
       # Environment variable injected into the vLLM container.
       # HF_TOKEN is needed because Llama 3.2 is a gated model — you must
       # accept Meta's license on HuggingFace before downloading.
@@ -57,12 +53,17 @@ spec:
               name: hf-secret    # References kserve/hf-secret.yaml
               key: HF_TOKEN
       # Arguments passed to the vLLM engine.
+      # --model: The HuggingFace model ID. vLLM downloads the model directly
+      #   from HuggingFace Hub at startup using HF_TOKEN for authentication.
+      #   We pass this as an arg instead of using storageUri with "hf://"
+      #   because KServe v0.14.x doesn't support the hf:// URI scheme.
       # --max_model_len=8192: Limits the maximum sequence length (input +
-      # output tokens). The default would try to use the model's full
-      # context length (128K for Llama 3.2), which requires more VRAM for
-      # the KV-cache than the T4 has. 8192 tokens is plenty for agent
-      # interactions and keeps VRAM usage within the T4's 16GB.
+      #   output tokens). The default would try to use the model's full
+      #   context length (128K for Llama 3.2), which requires more VRAM for
+      #   the KV-cache than the T4 has. 8192 tokens is plenty for agent
+      #   interactions and keeps VRAM usage within the T4's 16GB.
       args:
+        - "--model=meta-llama/Llama-3.2-3B-Instruct"
         - "--max_model_len=8192"
       # Resource requests and limits for the vLLM container.
       # requests: What the scheduler guarantees (used for scheduling decisions)

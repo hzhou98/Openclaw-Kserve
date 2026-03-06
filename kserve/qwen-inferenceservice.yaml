@@ -44,17 +44,20 @@ spec:
       runtime: kserve-huggingfaceserver
       # Qwen 3.5 2B is NOT gated — no license acceptance needed.
       # The HF_TOKEN is still useful to avoid download rate limits.
-      storageUri: "hf://Qwen/Qwen3.5-2B"
       env:
         - name: HF_TOKEN
           valueFrom:
             secretKeyRef:
               name: hf-secret
               key: HF_TOKEN
+      # --model: vLLM downloads the model directly from HuggingFace Hub.
+      #   We pass this as an arg instead of using storageUri with "hf://"
+      #   because KServe v0.14.x doesn't support the hf:// URI scheme.
       # --max_model_len=8192: Same reasoning as Llama — limits KV-cache
-      # VRAM usage. Qwen 3.5 2B supports up to 32K context but we cap
-      # at 8192 to stay well within T4's 16GB VRAM.
+      #   VRAM usage. Qwen 3.5 2B supports up to 32K context but we cap
+      #   at 8192 to stay well within T4's 16GB VRAM.
       args:
+        - "--model=Qwen/Qwen3.5-2B"
         - "--max_model_len=8192"
       resources:
         limits:
