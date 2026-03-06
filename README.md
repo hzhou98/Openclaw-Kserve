@@ -616,8 +616,8 @@ bash openclaw/install-openclaw.sh --values values-qwen.yaml
 
 ```bash
 kubectl port-forward -n openclaw svc/openclaw 18789:18789
-# Open http://localhost:18789
-# Enter your Gateway Token and click Connect
+# Open http://localhost:18789/?token=YOUR_GATEWAY_TOKEN
+# The browser remembers the token after the first access
 ```
 
 Approve the device pairing:
@@ -714,9 +714,9 @@ KServe automatically creates a Service named `llama-3-2b-predictor` in the `kser
 
 ### Where do I get the Gateway Token?
 
-The gateway token authenticates device pairing requests when connecting browsers or messaging apps to OpenClaw. There are three ways to set it:
+The gateway token authenticates access to the OpenClaw dashboard. It's configured in `openclaw.json` under `gateway.auth.token` using `${OPENCLAW_GATEWAY_TOKEN}` env substitution. There are three ways to set it:
 
-1. **Auto-generated (default):** `install-openclaw.sh` generates a random 32-char hex token via `openssl rand -hex 16` and prints it at the end of the install. Save it when you see it.
+1. **Auto-generated (default):** `install-openclaw.sh` generates a random 32-char hex token via `openssl rand -hex 16` and prints a ready-to-use URL at the end of the install.
 
 2. **Pre-set via environment variable:** Set `OPENCLAW_GATEWAY_TOKEN` before running the install script:
    ```bash
@@ -725,6 +725,14 @@ The gateway token authenticates device pairing requests when connecting browsers
    ```
 
 3. **Via Helm chart:** Pass it directly with `--set gatewayToken=my-secret-token`.
+
+**To access the UI**, pass the token in the URL:
+
+```
+http://localhost:18789/?token=YOUR_TOKEN_HERE
+```
+
+The browser remembers the token after the first successful access.
 
 **If you lost the token**, retrieve it from the Kubernetes secret:
 

@@ -19,7 +19,8 @@ app-template:
         main:
           # envFrom injects all key-value pairs from the referenced secret
           # as environment variables. The openclaw-env-secret contains
-          # OPENCLAW_GATEWAY_TOKEN (created by install-openclaw.sh).
+          # OPENCLAW_GATEWAY_TOKEN which is referenced via ${ENV_VAR}
+          # substitution in openclaw.json's gateway.auth.token field.
           envFrom:
             - secretRef:
                 name: openclaw-env-secret
@@ -58,6 +59,10 @@ app-template:
             "gateway": {
               "port": 18789,
               "mode": "local",
+              "auth": {
+                "mode": "token",
+                "token": "${OPENCLAW_GATEWAY_TOKEN}"
+              },
               "controlUi": {
                 "dangerouslyAllowHostHeaderOriginFallback": true
               }

@@ -12,10 +12,11 @@
 #   1. Creates the "openclaw" namespace (idempotently)
 #
 #   2. Creates the openclaw-env-secret containing the Gateway Token.
-#      The Gateway Token is used to authenticate when pairing devices
-#      (browsers, messaging apps) with the OpenClaw instance. If you don't
-#      provide one via OPENCLAW_GATEWAY_TOKEN env var, the script generates
-#      a random 32-character hex string using openssl.
+#      The token is referenced in openclaw.json via ${OPENCLAW_GATEWAY_TOKEN}
+#      env substitution (gateway.auth.token field). Access the UI by passing
+#      the token in the URL: http://localhost:18789/?token=YOUR_TOKEN
+#      If you don't provide one via OPENCLAW_GATEWAY_TOKEN env var, the
+#      script generates a random 32-character hex string using openssl.
 #
 #   3. Installs OpenClaw via its official Helm chart, using the custom
 #      values.yaml that configures the LLM backend to point at the KServe
@@ -73,14 +74,11 @@ kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -
 # -----------------------------------------------------------------------------
 # 2. Create secret with Gateway Token
 # -----------------------------------------------------------------------------
-# OPENCLAW_GATEWAY_TOKEN authenticates device pairing requests.
-# When you open the OpenClaw web UI and click "Connect", you must enter
-# this token. It prevents unauthorized devices from pairing with your
-# OpenClaw instance.
-#
-# The secret is referenced via envFrom in values.yaml, which injects all
-# key-value pairs from the secret as environment variables into the
-# OpenClaw container.
+# OPENCLAW_GATEWAY_TOKEN authenticates access to the OpenClaw dashboard.
+# The token is injected as an env var and referenced in openclaw.json via
+# ${OPENCLAW_GATEWAY_TOKEN} substitution in the gateway.auth.token field.
+# Access the UI by passing it in the URL: http://localhost:18789/?token=...
+# The browser remembers the token after the first successful access.
 # -----------------------------------------------------------------------------
 echo "--- Creating secret ---"
 kubectl create secret generic openclaw-env-secret \
@@ -130,7 +128,10 @@ echo "Gateway token: $GATEWAY_TOKEN"
 echo ""
 echo "To access the UI:"
 echo "  kubectl port-forward -n openclaw svc/openclaw 18789:18789"
-echo "  Open http://localhost:18789"
+echo "  Open http://localhost:18789/?token=$GATEWAY_TOKEN"
+echo ""
+echo "If you lose the token, retrieve it with:"
+echo "  kubectl get secret openclaw-env-secret -n openclaw -o jsonpath='{.data.OPENCLAW_GATEWAY_TOKEN}' | base64 -d"
 echo ""
 echo "To approve device pairing:"
 echo "  kubectl exec -n openclaw deployment/openclaw -c main -- node dist/index.js devices list"

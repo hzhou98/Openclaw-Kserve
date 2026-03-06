@@ -27,6 +27,10 @@ app-template:
             "gateway": {
               "port": 18789,
               "mode": "local",
+              "auth": {
+                "mode": "token",
+                "token": "${OPENCLAW_GATEWAY_TOKEN}"
+              },
               "controlUi": {
                 "dangerouslyAllowHostHeaderOriginFallback": true
               }
