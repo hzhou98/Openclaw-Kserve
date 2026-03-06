@@ -5,7 +5,7 @@
 # This Terraform config creates a cost-optimized GKE Standard cluster with
 # two node pools:
 #
-#   1. System pool (e2-medium, spot) - Runs Kubernetes system components,
+#   1. System pool (e2-standard-2, spot) - Runs Kubernetes system components,
 #      KServe controller, Istio, cert-manager, and the OpenClaw application.
 #      Always has at least 1 node running.
 #
@@ -21,9 +21,9 @@
 #   - GPU scale-to-zero = no GPU cost when idle
 #
 # Estimated costs:
-#   - Idle (no GPU):  ~$5-7/month  (1x e2-medium spot ~$7.30/mo)
-#   - GPU 24/7:       ~$100/month  (spot T4 ~$110/mo + system node)
-#   - GPU 8hrs/day:   ~$35-40/month
+#   - Idle (no GPU):  ~$10-15/month (1x e2-standard-2 spot ~$15/mo)
+#   - GPU 24/7:       ~$120/month   (spot T4 ~$110/mo + system node)
+#   - GPU 8hrs/day:   ~$45-50/month
 # =============================================================================
 
 terraform {
@@ -134,8 +134,9 @@ resource "google_container_cluster" "primary" {
 # Runs all non-GPU workloads: Kubernetes system pods, Istio, cert-manager,
 # KServe controller, and the OpenClaw application pod.
 #
-# e2-medium: 2 vCPUs, 4GB RAM. The smallest machine type that can comfortably
-# run all system components. Shared-core (burstable) which keeps costs low.
+# e2-standard-2: 2 vCPUs, 8GB RAM. Provides enough headroom for Istio,
+# cert-manager, KServe controller, and the OpenClaw application pod.
+# e2-medium (4GB) is too tight once all system components are running.
 #
 # Spot VMs: Up to 91% cheaper than on-demand, but GCP can reclaim them with
 # 30 seconds notice. For a dev cluster this is acceptable. GKE will
@@ -152,11 +153,11 @@ resource "google_container_node_pool" "system" {
 
   autoscaling {
     min_node_count = 1
-    max_node_count = 3
+    max_node_count = 4
   }
 
   node_config {
-    machine_type = "e2-medium"
+    machine_type = "e2-standard-2"
     spot         = true
     disk_size_gb = 30       # 30GB is enough for system workloads
     disk_type    = "pd-standard"  # HDD-backed, cheapest option (~$0.04/GB/mo)

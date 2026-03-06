@@ -3,65 +3,20 @@
 # =============================================================================
 #
 # This file overrides the default OpenClaw Helm chart values to point the
-# application at our self-hosted Llama 3.2 3B model instead of a cloud LLM API.
+# application at our self-hosted Llama 3.2 3B model via KServe + vLLM.
 #
-# OpenClaw uses the OpenAI SDK internally to communicate with LLMs. The
-# OpenAI SDK is endpoint-agnostic — it works with any server that implements
-# the OpenAI API spec (POST /v1/chat/completions). vLLM (running inside
-# KServe) implements this exact API, so OpenClaw treats it identically to
-# the real OpenAI API.
+# The chart uses bjw-s/app-template as its base, so all values are nested
+# under app-template. Model configuration lives in openclaw.json (via the
+# configMaps.config section), not environment variables.
 #
-# The Helm chart uses bjw-s/app-template as its base chart, which is why
-# values are nested under app-template.controllers.main.containers.main.
+# vLLM implements the OpenAI API spec (POST /v1/chat/completions), so we
+# register it as a custom provider with api: "openai-completions".
 # =============================================================================
 app-template:
   controllers:
     main:
       containers:
         main:
-          env:
-            # -----------------------------------------------------------------
-            # OPENAI_API_BASE: The base URL for the OpenAI-compatible API.
-            #
-            # This points to the KServe InferenceService's in-cluster Service.
-            # KServe creates a Service named <isvc-name>-predictor in the
-            # namespace where the InferenceService is deployed.
-            #
-            # Format: http://<isvc-name>-predictor.<namespace>.svc.cluster.local/v1
-            #
-            # Since our InferenceService is named "llama-3-2b" in the "kserve"
-            # namespace, the Service is "llama-3-2b-predictor.kserve".
-            #
-            # The /v1 suffix is important — vLLM serves at /v1/chat/completions,
-            # /v1/completions, /v1/models, etc. The OpenAI SDK appends the
-            # specific path to this base URL.
-            #
-            # This is an in-cluster URL (Kubernetes DNS), so traffic stays
-            # within the cluster network — no external hops, low latency.
-            # -----------------------------------------------------------------
-            OPENAI_API_BASE: "http://llama-3-2b-predictor.kserve.svc.cluster.local/v1"
-
-            # -----------------------------------------------------------------
-            # OPENAI_API_KEY: Required by the OpenAI SDK but not validated by vLLM.
-            #
-            # The OpenAI SDK throws an error if this is empty/unset, but vLLM
-            # doesn't check it by default. We set it to "dummy" to satisfy
-            # the SDK. If you later enable vLLM's --api-key flag, you'd put
-            # the real key here.
-            # -----------------------------------------------------------------
-            OPENAI_API_KEY: "dummy"
-
-            # -----------------------------------------------------------------
-            # LLM_MODEL: The model name to use in API requests.
-            #
-            # vLLM registers the model under its HuggingFace repo ID by default.
-            # This must exactly match what vLLM reports via GET /v1/models.
-            # You can verify by running:
-            #   kubectl run curl-test --rm -it --image=curlimages/curl --restart=Never -- \
-            #     curl -s http://llama-3-2b-predictor.kserve.svc.cluster.local/v1/models
-            # -----------------------------------------------------------------
-            LLM_MODEL: "meta-llama/Llama-3.2-3B-Instruct"
-
           # envFrom injects all key-value pairs from the referenced secret
           # as environment variables. The openclaw-env-secret contains
           # OPENCLAW_GATEWAY_TOKEN (created by install-openclaw.sh).
@@ -69,24 +24,69 @@ app-template:
             - secretRef:
                 name: openclaw-env-secret
 
-          # Resource requests/limits for the OpenClaw application container.
-          # OpenClaw is a Node.js app — it's lightweight and doesn't need
-          # much CPU or memory. These values provide comfortable headroom.
-          resources:
-            requests:
-              cpu: 250m       # 0.25 CPU cores — enough for idle/low traffic
-              memory: 512Mi   # 512MB RAM for Node.js runtime + app
-            limits:
-              cpu: "1"        # Burst up to 1 full core under load
-              memory: 1Gi     # Hard cap at 1GB to prevent OOM on the node
-
-  # Service configuration — exposes OpenClaw within the cluster.
-  # Port 18789 is OpenClaw's default gateway port.
-  service:
-    main:
-      ports:
-        http:
-          port: 18789
+  # ---------------------------------------------------------------------------
+  # OpenClaw configuration (openclaw.json)
+  # ---------------------------------------------------------------------------
+  # The configMaps.config.data."openclaw.json" field is the primary config
+  # file for OpenClaw. The init-config container copies (or merges) it into
+  # /home/node/.openclaw/openclaw.json on startup.
+  #
+  # We override the default config to:
+  #   1. Add a "kserve-vllm" custom provider pointing at our in-cluster
+  #      vLLM endpoint (KServe InferenceService).
+  #   2. Set the default agent model to use that provider.
+  #
+  # Model provider config:
+  #   - baseUrl: KServe creates a Service named <isvc-name>-predictor in the
+  #     namespace where the InferenceService is deployed. Our InferenceService
+  #     is "llama-3-2b" in namespace "kserve", so the Service is
+  #     "llama-3-2b-predictor.kserve.svc.cluster.local". The /v1 suffix is
+  #     required — vLLM serves at /v1/chat/completions, /v1/models, etc.
+  #   - api: "openai-completions" tells OpenClaw to use the OpenAI completions
+  #     protocol when talking to this provider.
+  #   - apiKey: vLLM doesn't validate API keys by default, but OpenClaw
+  #     requires a non-empty value. "dummy" satisfies this.
+  #   - models[].id: Must exactly match what vLLM reports via GET /v1/models
+  #     (the HuggingFace repo ID by default).
+  # ---------------------------------------------------------------------------
+  configMaps:
+    config:
+      enabled: true
+      data:
+        openclaw.json: |
+          {
+            "gateway": {
+              "port": 18789,
+              "mode": "local"
+            },
+            "models": {
+              "mode": "merge",
+              "providers": {
+                "kserve-vllm": {
+                  "baseUrl": "http://llama-3-2b-predictor.kserve.svc.cluster.local/v1",
+                  "api": "openai-completions",
+                  "apiKey": "dummy",
+                  "models": [
+                    {
+                      "id": "meta-llama/Llama-3.2-3B-Instruct",
+                      "name": "Llama 3.2 3B (KServe)",
+                      "reasoning": false,
+                      "input": ["text"],
+                      "contextWindow": 8192,
+                      "maxTokens": 4096
+                    }
+                  ]
+                }
+              }
+            },
+            "agents": {
+              "defaults": {
+                "model": {
+                  "primary": "kserve-vllm/meta-llama/Llama-3.2-3B-Instruct"
+                }
+              }
+            }
+          }
 
   # Persistent volume for OpenClaw's data (conversation history, device
   # pairings, configuration). Uses the cluster's default StorageClass

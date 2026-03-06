@@ -103,7 +103,7 @@ kubectl create secret generic openclaw-env-secret \
 #   (e.g., image pull issues, resource constraints).
 # -----------------------------------------------------------------------------
 echo "--- Installing OpenClaw via Helm ---"
-helm repo add openclaw https://serhanekicii.github.io/openclaw-helm
+helm repo add openclaw https://serhanekicii.github.io/openclaw-helm --force-update
 helm repo update openclaw
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -18,7 +18,7 @@ KServe InferenceService                      ← vLLM serving engine
         │
         ▼
 GKE Standard Cluster (us-central1-a, zonal)
-  ├─ System pool: e2-medium spot (1-3 nodes) ← Runs everything except the model
+  ├─ System pool: e2-standard-2 spot (1-4 nodes) ← Runs everything except the model
   └─ GPU pool: n1-standard-4 + T4 spot (0-2) ← Scales to zero when idle
 ```
 
@@ -371,7 +371,7 @@ cat terraform/terraform.tfvars               # project_id set correctly
 | **GPU quota request** | Google reviews and approves your T4/L4 quota increase | Minutes to 48 hours* |
 | **Terraform init** | Downloads the Google provider plugin (~200MB) | ~1-2 min |
 | **Terraform apply — GKE cluster** | Provisions the Kubernetes control plane (API server, etcd, scheduler) | **~8-12 min** |
-| **Terraform apply — system pool** | Creates 1x e2-medium spot VM, installs kubelet | ~2-3 min |
+| **Terraform apply — system pool** | Creates 1x e2-standard-2 spot VM, installs kubelet | ~2-3 min |
 | **Terraform apply — GPU pool** | Creates pool definition (0 nodes initially, no VM yet) | ~1 min |
 | **cert-manager install** | Helm chart + wait for pods Ready | ~1-2 min |
 | **Istio install** | 3 Helm charts (base + istiod + gateway) + LoadBalancer IP | ~2-3 min |
@@ -445,7 +445,7 @@ Provisions the complete GKE cluster with two node pools. Key design decisions:
 | Decision | Choice | Why |
 |----------|--------|-----|
 | Cluster type | Zonal (single zone) | Free control plane ($0 vs $74.40/mo for regional) |
-| System VMs | e2-medium spot | Cheapest burstable VM that fits all system pods |
+| System VMs | e2-standard-2 spot | 2 vCPU, 8GB RAM — enough headroom for all system pods |
 | GPU VMs | n1-standard-4 + T4 spot | Minimum machine type for T4 attachment; spot = ~60% savings |
 | GPU pool min | 0 nodes | Scale-to-zero eliminates GPU cost when idle |
 | GPU taint | `nvidia.com/gpu=present:NoSchedule` | Prevents non-GPU pods from wasting expensive GPU nodes |
@@ -657,12 +657,12 @@ kubectl run curl-test --rm -it --image=curlimages/curl --restart=Never -- \
 | Component | Spot $/hr | Spot $/month (24/7) |
 |-----------|-----------|---------------------|
 | GKE control plane (zonal) | $0.00 | $0.00 |
-| e2-medium spot (system) | ~$0.01 | ~$7.30 |
+| e2-standard-2 spot (system) | ~$0.02 | ~$14.60 |
 | n1-standard-4 spot (GPU host) | ~$0.04 | ~$28.80 |
 | T4 GPU spot | ~$0.11 | ~$80.00 |
 | pd-standard 80GB total | ~$0.004 | ~$3.20 |
-| **Total (GPU running)** | **~$0.16** | **~$119** |
-| **Total (GPU scaled to zero)** | **~$0.01** | **~$10** |
+| **Total (GPU running)** | **~$0.17** | **~$126** |
+| **Total (GPU scaled to zero)** | **~$0.02** | **~$15** |
 
 All nodes use spot instances. The GPU pool scales to zero when idle.
 
@@ -698,6 +698,40 @@ The original approach was to annotate the webhooks with `meta.helm.sh/release-na
 ### Why can't `--force` or `--force-replace` fix the conflict?
 
 Helm's `--force` flag (deprecated alias for `--force-replace`) tells Helm to delete and recreate changed resources. However, this flag is incompatible with server-side apply — Helm rejects the combination with the error `"cannot use server-side apply and force replace together"`. The solution is to remove the conflicting resource (the webhook) before the install, rather than trying to force through the conflict.
+
+### Why is the model API URL `http://llama-3-2b-predictor.kserve.svc.cluster.local/v1`?
+
+This is a standard Kubernetes in-cluster DNS name. Each part has a specific origin:
+
+| Part | Meaning |
+|------|---------|
+| `llama-3-2b` | The InferenceService name (from `metadata.name` in `llama-inferenceservice.yaml`) |
+| `-predictor` | KServe appends this — every InferenceService has a "predictor" component (the model server) |
+| `.kserve` | The Kubernetes namespace where the InferenceService is deployed |
+| `.svc.cluster.local` | Standard K8s DNS suffix for Services (`<service>.<namespace>.svc.cluster.local`) |
+| `/v1` | vLLM's OpenAI-compatible API prefix (e.g., `/v1/chat/completions`, `/v1/models`) |
+
+KServe automatically creates a Service named `llama-3-2b-predictor` in the `kserve` namespace, and Kubernetes DNS makes it reachable at that full hostname from any pod in the cluster.
+
+### Where do I get the Gateway Token?
+
+The gateway token authenticates device pairing requests when connecting browsers or messaging apps to OpenClaw. There are three ways to set it:
+
+1. **Auto-generated (default):** `install-openclaw.sh` generates a random 32-char hex token via `openssl rand -hex 16` and prints it at the end of the install. Save it when you see it.
+
+2. **Pre-set via environment variable:** Set `OPENCLAW_GATEWAY_TOKEN` before running the install script:
+   ```bash
+   export OPENCLAW_GATEWAY_TOKEN=my-secret-token
+   bash openclaw/install-openclaw.sh
+   ```
+
+3. **Via Helm chart:** Pass it directly with `--set gatewayToken=my-secret-token`.
+
+**If you lost the token**, retrieve it from the Kubernetes secret:
+
+```bash
+kubectl get secret openclaw-env-secret -n openclaw -o jsonpath='{.data.OPENCLAW_GATEWAY_TOKEN}' | base64 -d
+```
 
 ## Helm Chart (Alternative to Scripts)
 
@@ -853,7 +887,7 @@ Use `stop.sh` and `start.sh` to pause and resume the cluster without a full tear
 ### Stopping
 
 ```bash
-./stop.sh              # Stop GPU only — delete model, system pool stays (~$0.01/hr)
+./stop.sh              # Stop GPU only — delete model, system pool stays (~$0.02/hr)
 ./stop.sh --all        # Stop everything — resize all pools to 0 nodes (~$0.00/hr)
 ./stop.sh --destroy    # Destroy cluster entirely via Terraform ($0.00, needs full redeploy)
 ```
@@ -870,7 +904,7 @@ Use `stop.sh` and `start.sh` to pause and resume the cluster without a full tear
 
 | Command | What happens | Hourly cost | Restart time |
 |---------|-------------|-------------|-------------|
-| `./stop.sh` | Model deleted, GPU scales to 0, system pool stays | ~$0.01 | ~5-10 min |
+| `./stop.sh` | Model deleted, GPU scales to 0, system pool stays | ~$0.02 | ~5-10 min |
 | `./stop.sh --all` | All node pools resized to 0, control plane stays (free) | ~$0.00 | ~5-10 min |
 | `./stop.sh --destroy` | Cluster deleted entirely via Terraform | $0.00 | ~25-40 min (full deploy.sh) |
 
@@ -881,10 +915,10 @@ Use `stop.sh` and `start.sh` to pause and resume the cluster without a full tear
 ./start.sh                  # GPU node provisions, model loads (~5-10 min)
 
 # Evening: done for the day
-./stop.sh                   # GPU stops, saves ~$0.15/hr
+./stop.sh                   # GPU stops, saves ~$0.15/hr GPU cost
 
 # Weekend: not using it at all
-./stop.sh --all             # Everything stops, saves ~$0.16/hr
+./stop.sh --all             # Everything stops, saves ~$0.17/hr
 
 # Monday: back to work
 ./start.sh --all            # Nodes + model restart (~5-10 min)
@@ -924,7 +958,7 @@ kubectl delete inferenceservice llama-3-2b -n kserve
 kubectl get nodes -l pool=gpu
 # No resources found
 
-# Cost after this: ~$0.01/hr (system pool only)
+# Cost after this: ~$0.02/hr (system pool only)
 ```
 
 To bring the model back:
@@ -962,7 +996,7 @@ argocd app delete openclaw-stack --cascade  # Deletes all child apps
 helm uninstall argocd -n argocd
 kubectl delete namespace argocd
 
-# Cost after this: ~$0.01/hr (empty system pool)
+# Cost after this: ~$0.02/hr (empty system pool)
 ```
 
 ### Option 3: Delete the GKE cluster (keep the GCP project)

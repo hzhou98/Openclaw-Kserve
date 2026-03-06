@@ -144,7 +144,7 @@ fi
 # This step takes ~8-12 minutes (GKE cluster creation is slow).
 # It creates:
 #   - The GKE cluster control plane
-#   - System node pool (1x e2-medium spot — starts immediately)
+#   - System node pool (1x e2-standard-2 spot — starts immediately)
 #   - GPU node pool definition (0 nodes initially — scales up on demand)
 # =============================================================================
 echo ""
