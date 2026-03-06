@@ -48,7 +48,7 @@ app-template:
                       "name": "Qwen 3.5 2B (KServe)",
                       "reasoning": false,
                       "input": ["text"],
-                      "contextWindow": 8192,
+                      "contextWindow": 131072,
                       "maxTokens": 4096
                     }
                   ]

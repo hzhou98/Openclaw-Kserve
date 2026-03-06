@@ -80,7 +80,7 @@ app-template:
                       "name": "Llama 3.2 3B (KServe)",
                       "reasoning": false,
                       "input": ["text"],
-                      "contextWindow": 8192,
+                      "contextWindow": 131072,
                       "maxTokens": 4096
                     }
                   ]

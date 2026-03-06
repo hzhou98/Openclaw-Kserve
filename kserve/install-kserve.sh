@@ -187,8 +187,6 @@ echo "--- Installing KServe ---"
 # RawDeployment mode), so its certs are never provisioned and it rejects
 # all ServingRuntime mutations with "unable to parse bytes as PEM block".
 
-sleep 120 # Wait a bit for any existing webhooks to be created before deleting
-
 KSERVE_WEBHOOKS=(
   clusterservingruntime.serving.kserve.io
   inferenceservice.serving.kserve.io
@@ -223,14 +221,18 @@ helm upgrade --install kserve-crd oci://ghcr.io/kserve/charts/kserve-crd \
   --version v0.14.1 \
   --wait
 
-# Delete the ModelMesh webhook again — kserve-crd just recreated it, and
-# cert-manager-cainjector may have already claimed server-side apply ownership
-# of .clientConfig.caBundle. That conflicts with Helm's own apply. Since we
-# don't use ModelMesh (RawDeployment mode), safe to remove.
-if kubectl get validatingwebhookconfiguration modelmesh-servingruntime.serving.kserve.io &>/dev/null; then
-  echo "  Deleting modelmesh-servingruntime webhook to avoid field ownership conflict..."
-  kubectl delete validatingwebhookconfiguration modelmesh-servingruntime.serving.kserve.io
-fi
+# Delete ALL KServe webhooks again — kserve-crd just recreated them.
+# Two problems if we don't:
+#   1. ModelMesh webhook has no certs (we don't run ModelMesh) and rejects all
+#      ServingRuntime mutations with "unable to parse bytes as PEM block".
+#   2. KServe webhooks point at kserve-webhook-server-service which has no
+#      endpoints yet (the controller pod comes from the kserve chart below).
+for webhook in "${KSERVE_WEBHOOKS[@]}"; do
+  if kubectl get validatingwebhookconfiguration "$webhook" &>/dev/null; then
+    echo "  Deleting $webhook webhook..."
+    kubectl delete validatingwebhookconfiguration "$webhook"
+  fi
+done
 
 helm upgrade --install kserve oci://ghcr.io/kserve/charts/kserve \
   --namespace kserve \
