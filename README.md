@@ -19,7 +19,7 @@ KServe InferenceService                      ← vLLM serving engine
         ▼
 GKE Standard Cluster (us-central1-a, zonal)
   ├─ System pool: e2-standard-2 spot (1-4 nodes) ← Runs everything except the model
-  └─ GPU pool: g2-standard-4 + L4 spot (0-2)  ← Scales to zero when idle
+  └─ GPU pool: g2-standard-4 + L4 spot (0-1)  ← Scales to zero when idle
 ```
 
 ### How the pieces connect
@@ -291,7 +291,7 @@ If the limit is 0, request an increase:
 2. Filter by: **Service = "Compute Engine API"**, then search **"NVIDIA L4"**
 3. Select **"NVIDIA L4 GPUs"** for region **us-central1**
 4. Click **"Edit Quotas"**
-5. Request a new limit of **2** (our GPU pool allows max 2 nodes)
+5. Request a new limit of **1** (our GPU pool allows max 1 node)
 6. Add justification: *"ML model serving for development/testing"*
 7. Submit and wait for approval
 

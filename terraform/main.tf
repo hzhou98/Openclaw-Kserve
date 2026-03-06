@@ -224,7 +224,7 @@ resource "google_container_node_pool" "gpu" {
 
   autoscaling {
     min_node_count = 0    # Scale to zero when no GPU workloads exist
-    max_node_count = 2    # Allow up to 2 GPU nodes for headroom
+    max_node_count = 1    # GCP quota allows 1 GPU
   }
 
   node_config {
