@@ -714,7 +714,20 @@ KServe automatically creates a Service named `llama-3-2b-predictor` in the `kser
 
 ### Where do I get the Gateway Token?
 
-The gateway token authenticates access to the OpenClaw dashboard. It's configured in `openclaw.json` under `gateway.auth.token` using `${OPENCLAW_GATEWAY_TOKEN}` env substitution. There are three ways to set it:
+The gateway token authenticates access to the OpenClaw dashboard. Here's how it flows from the install script into the running container:
+
+```
+install-openclaw.sh                     # 1. Generates token (or uses $OPENCLAW_GATEWAY_TOKEN)
+  └→ kubectl create secret              # 2. Stores it in K8s Secret "openclaw-env-secret"
+       └→ values.yaml envFrom:          # 3. Injects secret as env vars into the container
+            └→ openclaw.json            # 4. References it via ${OPENCLAW_GATEWAY_TOKEN}
+                "auth": {               #    substitution at runtime
+                  "mode": "token",
+                  "token": "${OPENCLAW_GATEWAY_TOKEN}"
+                }
+```
+
+There are three ways to set it:
 
 1. **Auto-generated (default):** `install-openclaw.sh` generates a random 32-char hex token via `openssl rand -hex 16` and prints a ready-to-use URL at the end of the install.
 
