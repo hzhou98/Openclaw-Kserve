@@ -14,7 +14,7 @@
 #
 # Model choice:
 #   Llama 3.2 3B Instruct is chosen because:
-#   - 3B parameters fits comfortably in T4's 16GB VRAM (~6GB in FP16)
+#   - 3B parameters fits comfortably in L4's 24GB VRAM (~6GB in FP16)
 #   - Instruct-tuned for chat/agent use cases (follows instructions well)
 #   - Open-weight with permissive license (Meta Community License)
 #   - Note: There is no "2B" variant; the Llama 3.2 sizes are 1B and 3B.
@@ -24,7 +24,7 @@
 #   1. KServe controller sees this InferenceService and creates a Deployment
 #   2. The Deployment runs the kserve-huggingfaceserver container (vLLM)
 #   3. vLLM downloads the model from HuggingFace using the HF_TOKEN secret
-#   4. vLLM loads the model onto the T4 GPU and starts an HTTP server
+#   4. vLLM loads the model onto the L4 GPU and starts an HTTP server
 #   5. KServe creates a Service (llama-3-2b-predictor) for routing
 # =============================================================================
 apiVersion: serving.kserve.io/v1beta1
@@ -60,7 +60,7 @@ spec:
       # --max_model_len=8192: Limits the maximum sequence length (input +
       #   output tokens). The default would try to use the model's full
       #   context length (128K for Llama 3.2), which requires more VRAM for
-      #   the KV-cache than the T4 has. 8192 tokens is plenty for agent
+      #   the KV-cache than the L4 has. 8192 tokens is plenty for agent
       #   interactions and keeps VRAM usage within the T4's 16GB.
       args:
         - "--model=meta-llama/Llama-3.2-3B-Instruct"
@@ -70,7 +70,7 @@ spec:
       # limits: Hard cap the container cannot exceed
       #
       # GPU: nvidia.com/gpu must be set in BOTH requests and limits.
-      # Setting it to "1" claims one T4 GPU exclusively for this pod.
+      # Setting it to "1" claims one L4 GPU exclusively for this pod.
       #
       # Memory: 16Gi limit because vLLM uses system RAM for:
       #   - Model weight loading before GPU transfer

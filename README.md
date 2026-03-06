@@ -14,12 +14,12 @@ OpenClaw Pod (port 18789)                    ← Node.js app, ~512MB RAM
         ▼
 KServe InferenceService                      ← vLLM serving engine
   Llama 3.2 3B Instruct                      ← ~6GB VRAM (FP16)
-  (T4 GPU, 16GB VRAM, spot instance)
+  (L4 GPU, 24GB VRAM, spot instance)
         │
         ▼
 GKE Standard Cluster (us-central1-a, zonal)
   ├─ System pool: e2-standard-2 spot (1-4 nodes) ← Runs everything except the model
-  └─ GPU pool: n1-standard-4 + T4 spot (0-2) ← Scales to zero when idle
+  └─ GPU pool: g2-standard-4 + L4 spot (0-2)  ← Scales to zero when idle
 ```
 
 ### How the pieces connect
@@ -28,7 +28,7 @@ GKE Standard Cluster (us-central1-a, zonal)
 
 2. **KServe** manages the model lifecycle. When you create an InferenceService, KServe creates a Deployment running vLLM, a Service for routing, and (optionally) Istio VirtualServices for external access.
 
-3. **vLLM** downloads the model from HuggingFace, loads it onto the T4 GPU, and serves an OpenAI-compatible HTTP API. OpenClaw doesn't know or care that it's talking to a local model instead of OpenAI's servers.
+3. **vLLM** downloads the model from HuggingFace, loads it onto the L4 GPU, and serves an OpenAI-compatible HTTP API. OpenClaw doesn't know or care that it's talking to a local model instead of OpenAI's servers.
 
 4. **GKE cluster autoscaler** manages GPU costs: the GPU node pool is configured with `min=0`, so when no GPU pods exist, the pool scales to zero nodes (no GPU charges). When the InferenceService is created, the autoscaler provisions a GPU node.
 
@@ -272,13 +272,13 @@ What each API does:
 **This is the most common blocker for new GCP accounts.** New projects often have a GPU quota of **zero** — you must request an increase before any GPU VMs can be created.
 
 ```bash
-# Check your T4 GPU quota in us-central1
+# Check your L4 GPU quota in us-central1
 gcloud compute regions describe us-central1 \
   --project=openclaw-kserve-001 \
-  --format=json | grep -A5 '"metric": "NVIDIA_T4_GPUS"'
+  --format=json | grep -A5 '"metric": "NVIDIA_L4_GPUS"'
 
 # Expected output (limit > 0 means you're good):
-#   "metric": "NVIDIA_T4_GPUS",
+#   "metric": "NVIDIA_L4_GPUS",
 #   "limit": 2.0,
 #   "usage": 0.0,
 #   "owner": "..."
@@ -288,8 +288,8 @@ gcloud compute regions describe us-central1 \
 If the limit is 0, request an increase:
 
 1. Go to: https://console.cloud.google.com/iam-admin/quotas
-2. Filter by: **Service = "Compute Engine API"**, then search **"NVIDIA T4"**
-3. Select **"NVIDIA T4 GPUs"** for region **us-central1**
+2. Filter by: **Service = "Compute Engine API"**, then search **"NVIDIA L4"**
+3. Select **"NVIDIA L4 GPUs"** for region **us-central1**
 4. Click **"Edit Quotas"**
 5. Request a new limit of **2** (our GPU pool allows max 2 nodes)
 6. Add justification: *"ML model serving for development/testing"*
@@ -354,7 +354,7 @@ gcloud services list --enabled | grep -E "compute|container|iam"
 # iamcredentials.googleapis.com
 
 # GPU quota
-gcloud compute regions describe us-central1 --format=json | grep -A5 '"metric": "NVIDIA_T4_GPUS"'
+gcloud compute regions describe us-central1 --format=json | grep -A5 '"metric": "NVIDIA_L4_GPUS"'
 # "limit": 2.0
 
 # Terraform
@@ -368,7 +368,7 @@ cat terraform/terraform.tfvars               # project_id set correctly
 | Step | What happens | Time |
 |------|-------------|------|
 | **GCP setup** (`setup-gcp.sh`) | Auth, create project, enable APIs, check quota | ~3-5 min |
-| **GPU quota request** | Google reviews and approves your T4/L4 quota increase | Minutes to 48 hours* |
+| **GPU quota request** | Google reviews and approves your L4 quota increase | Minutes to 48 hours* |
 | **Terraform init** | Downloads the Google provider plugin (~200MB) | ~1-2 min |
 | **Terraform apply — GKE cluster** | Provisions the Kubernetes control plane (API server, etcd, scheduler) | **~8-12 min** |
 | **Terraform apply — system pool** | Creates 1x e2-standard-2 spot VM, installs kubelet | ~2-3 min |
@@ -376,10 +376,10 @@ cat terraform/terraform.tfvars               # project_id set correctly
 | **cert-manager install** | Helm chart + wait for pods Ready | ~1-2 min |
 | **Istio install** | 3 Helm charts (base + istiod + gateway) + LoadBalancer IP | ~2-3 min |
 | **KServe install** | 2 Helm charts (CRDs + controller) | ~1-2 min |
-| **Model deploy — GPU scale-up** | GKE autoscaler provisions n1-standard-4 + T4 spot VM | **~3-5 min** |
+| **Model deploy — GPU scale-up** | GKE autoscaler provisions g2-standard-4 + L4 spot VM | **~3-5 min** |
 | **Model deploy — driver install** | GKE installs NVIDIA GPU drivers on the new node | ~1-2 min |
 | **Model deploy — download** | vLLM downloads Llama 3.2 3B from HuggingFace (~6GB) | ~1-3 min |
-| **Model deploy — load** | vLLM loads model weights into T4 GPU VRAM | ~1 min |
+| **Model deploy — load** | vLLM loads model weights into L4 GPU VRAM | ~1 min |
 | **OpenClaw install** | Helm chart + wait for pod Ready | ~1-2 min |
 | **Total** | | **~25-40 min** |
 
@@ -402,7 +402,7 @@ cat terraform/terraform.tfvars               # project_id set correctly
 The two slowest steps are **GKE cluster creation** (~8-12 min) and **GPU node provisioning** (~3-5 min). Both involve GCP spinning up real VMs, which is why they're slow. Everything else is Helm installs that take 1-3 minutes each.
 
 If the GPU node takes longer than 5 minutes, check for:
-- Spot VM capacity issues (the zone may be out of spot T4s — try a different zone)
+- Spot VM capacity issues (the zone may be out of spot L4s — try a different zone)
 - Quota exhaustion (`kubectl describe pod -n kserve <pod>` will show "insufficient quota" events)
 
 ## Quick Start
@@ -431,7 +431,7 @@ Interactive script that handles all one-time GCP setup. It:
 2. **Creates/selects** a GCP project (the organizational unit for all resources)
 3. **Links billing** (required before any paid resources can be created)
 4. **Enables APIs** (Compute, GKE, IAM, Resource Manager — disabled by default)
-5. **Checks GPU quota** (new accounts often have 0 T4 quota — must request increase)
+5. **Checks GPU quota** (new accounts often have 0 L4 quota — must request increase)
 6. **Sets gcloud defaults** (region and zone so you don't pass them every time)
 7. **Writes `terraform.tfvars`** automatically (no manual editing needed)
 8. **Checks for missing tools** (terraform, kubectl, helm — with install instructions)
@@ -446,7 +446,7 @@ Provisions the complete GKE cluster with two node pools. Key design decisions:
 |----------|--------|-----|
 | Cluster type | Zonal (single zone) | Free control plane ($0 vs $74.40/mo for regional) |
 | System VMs | e2-standard-2 spot | 2 vCPU, 8GB RAM — enough headroom for all system pods |
-| GPU VMs | n1-standard-4 + T4 spot | Minimum machine type for T4 attachment; spot = ~60% savings |
+| GPU VMs | g2-standard-4 + L4 spot | g2 series includes L4 GPU; spot = ~60% savings |
 | GPU pool min | 0 nodes | Scale-to-zero eliminates GPU cost when idle |
 | GPU taint | `nvidia.com/gpu=present:NoSchedule` | Prevents non-GPU pods from wasting expensive GPU nodes |
 | Disk type | pd-standard (HDD) | Cheapest option; SSD not needed for this workload |
@@ -494,8 +494,8 @@ The core KServe resource that deploys the Llama model. Key fields:
 |-------|-------|---------|
 | `modelFormat.name` | `huggingface` | Use vLLM backend (OpenAI-compatible) |
 | `storageUri` | `hf://meta-llama/Llama-3.2-3B-Instruct` | Download from HuggingFace Hub |
-| `args: --max_model_len=8192` | 8192 tokens | Limits KV-cache VRAM usage to fit T4's 16GB |
-| `nvidia.com/gpu: "1"` | 1 GPU | Claims one T4 exclusively |
+| `args: --max_model_len=8192` | 8192 tokens | Limits KV-cache VRAM usage for efficient inference |
+| `nvidia.com/gpu: "1"` | 1 GPU | Claims one L4 exclusively |
 | `tolerations` | nvidia.com/gpu taint | Allows scheduling on tainted GPU nodes |
 | `nodeSelector: pool: gpu` | GPU pool only | Ensures pod lands on a GPU node |
 
@@ -658,10 +658,9 @@ kubectl run curl-test --rm -it --image=curlimages/curl --restart=Never -- \
 |-----------|-----------|---------------------|
 | GKE control plane (zonal) | $0.00 | $0.00 |
 | e2-standard-2 spot (system) | ~$0.02 | ~$14.60 |
-| n1-standard-4 spot (GPU host) | ~$0.04 | ~$28.80 |
-| T4 GPU spot | ~$0.11 | ~$80.00 |
+| g2-standard-4 spot (GPU host, includes L4) | ~$0.14 | ~$100.00 |
 | pd-standard 80GB total | ~$0.004 | ~$3.20 |
-| **Total (GPU running)** | **~$0.17** | **~$126** |
+| **Total (GPU running)** | **~$0.17** | **~$118** |
 | **Total (GPU scaled to zero)** | **~$0.02** | **~$15** |
 
 All nodes use spot instances. The GPU pool scales to zero when idle.
@@ -670,7 +669,7 @@ All nodes use spot instances. The GPU pool scales to zero when idle.
 
 | Problem | Command | Common Fix |
 |---------|---------|-----------|
-| GPU node not provisioning | `kubectl describe pod -n kserve <pod>` | Check T4 quota in the zone; try a different zone |
+| GPU node not provisioning | `kubectl describe pod -n kserve <pod>` | Check L4 quota in the zone; try a different zone |
 | Model download failing | `kubectl logs -n kserve <pod>` | Verify HF token and license acceptance |
 | InferenceService stuck | `kubectl get events -n kserve --sort-by='.lastTimestamp'` | Check resource limits, node taints |
 | OpenClaw can't reach model | `kubectl logs -n openclaw <pod>` | Verify OPENAI_API_BASE URL matches the Service name |

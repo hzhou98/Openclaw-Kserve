@@ -55,7 +55,7 @@ spec:
       #   because KServe v0.14.x doesn't support the hf:// URI scheme.
       # --max_model_len=8192: Same reasoning as Llama — limits KV-cache
       #   VRAM usage. Qwen 3.5 2B supports up to 32K context but we cap
-      #   at 8192 to stay well within T4's 16GB VRAM.
+      #   at 8192 to stay well within L4's 24GB VRAM.
       args:
         - "--model=Qwen/Qwen3.5-2B"
         - "--max_model_len=8192"

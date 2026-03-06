@@ -194,13 +194,12 @@ resource "google_container_node_pool" "system" {
 # -----------------------------------------------------------------------------
 # Runs the Llama 3.2 3B model served by vLLM via KServe.
 #
-# n1-standard-4: 4 vCPUs, 15GB RAM. Required minimum for T4 GPU attachment.
-# The model itself uses ~6GB GPU VRAM + ~8GB system RAM for the vLLM process.
+# g2-standard-4: 4 vCPUs, 16GB RAM. The g2 machine series is designed for
+# L4 GPU attachment (L4 is included in the machine, not added separately).
 #
-# nvidia-tesla-t4: 16GB VRAM, good price/performance for inference.
-# Llama 3.2 3B in FP16 needs ~6GB VRAM, fitting easily in the T4's 16GB.
-# The --max_model_len=8192 in the InferenceService keeps KV-cache within
-# the remaining ~10GB VRAM.
+# nvidia-l4: 24GB VRAM, newer Ada Lovelace architecture with better
+# price/performance than T4 for inference. Llama 3.2 3B in FP16 needs
+# ~6GB VRAM, fitting easily with room for larger KV-cache or larger models.
 #
 # gpu_driver_installation_config: Tells GKE to automatically install the
 # NVIDIA GPU driver on these nodes. Without this, you'd need to manually
@@ -229,13 +228,13 @@ resource "google_container_node_pool" "gpu" {
   }
 
   node_config {
-    machine_type = "n1-standard-4"  # 4 vCPU, 15GB RAM — minimum for T4
+    machine_type = "g2-standard-4"  # 4 vCPU, 16GB RAM — designed for L4 GPU
     spot         = true
     disk_size_gb = 50       # Extra space for model download cache
     disk_type    = "pd-standard"
 
     guest_accelerator {
-      type  = "nvidia-tesla-t4"   # 16GB VRAM, ~$0.11/hr spot
+      type  = "nvidia-l4"          # 24GB VRAM, ~$0.14/hr spot
       count = 1                    # 1 GPU per node
       gpu_driver_installation_config {
         gpu_driver_version = "LATEST"  # GKE auto-installs NVIDIA drivers
