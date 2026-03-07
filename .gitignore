@@ -8,3 +8,4 @@ terraform/.terraform.tfstate.lock.info
 kserve/.hf_secret
 kserve/.hf_token
 kserve/hf-secret.yaml
+openclaw/open-ai.key

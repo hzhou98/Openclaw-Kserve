@@ -221,17 +221,17 @@ helm upgrade --install kserve-crd oci://ghcr.io/kserve/charts/kserve-crd \
   --version v0.14.1 \
   --wait
 
-# Delete ALL KServe webhooks again — kserve-crd just recreated them.
+# Delete ALL KServe/ModelMesh webhooks — kserve-crd just recreated them.
 # Two problems if we don't:
 #   1. ModelMesh webhook has no certs (we don't run ModelMesh) and rejects all
 #      ServingRuntime mutations with "unable to parse bytes as PEM block".
 #   2. KServe webhooks point at kserve-webhook-server-service which has no
 #      endpoints yet (the controller pod comes from the kserve chart below).
+# Delete both validating AND mutating webhook configs unconditionally.
+echo "  Deleting KServe webhooks before kserve install..."
 for webhook in "${KSERVE_WEBHOOKS[@]}"; do
-  if kubectl get validatingwebhookconfiguration "$webhook" &>/dev/null; then
-    echo "  Deleting $webhook webhook..."
-    kubectl delete validatingwebhookconfiguration "$webhook"
-  fi
+  kubectl delete validatingwebhookconfiguration "$webhook" --ignore-not-found
+  kubectl delete mutatingwebhookconfiguration "$webhook" --ignore-not-found
 done
 
 helm upgrade --install kserve oci://ghcr.io/kserve/charts/kserve \

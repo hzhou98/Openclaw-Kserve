@@ -419,6 +419,10 @@ export HF_TOKEN=hf_your_token_here
 chmod +x deploy.sh kserve/install-kserve.sh openclaw/install-openclaw.sh
 ./deploy.sh                # Uses Llama 3.2 3B (default)
 # ./deploy.sh --model qwen  # Use Qwen 3.5 2B if Llama license not approved
+
+# OR: Skip GPU entirely and use OpenAI API
+export OPENAI_API_KEY=sk-...
+bash openclaw/install-openclaw.sh --values values-openai.yaml
 ```
 
 ## File-by-File Explanation
@@ -501,21 +505,39 @@ The core KServe resource that deploys the Llama model. Key fields:
 
 When applied, this triggers: KServe creates Deployment → pod unschedulable → GKE autoscaler provisions GPU node → drivers install → model downloads → vLLM starts serving.
 
-### `openclaw/values.yaml` — OpenClaw Helm Configuration
+### `openclaw/values*.yaml` — OpenClaw Helm Configuration
 
-Overrides the default Helm chart values to connect OpenClaw to the local model:
+Three values files for different model backends:
 
-| Env Variable | Value | Purpose |
-|-------------|-------|---------|
-| `OPENAI_API_BASE` | `http://llama-3-2b-predictor.kserve.svc.cluster.local/v1` | KServe in-cluster Service URL |
-| `OPENAI_API_KEY` | `dummy` | Required by OpenAI SDK but not validated by vLLM |
-| `LLM_MODEL` | `meta-llama/Llama-3.2-3B-Instruct` | Must match vLLM's registered model name |
+| File | Provider | GPU needed | API key needed | Default model |
+|------|----------|-----------|----------------|---------------|
+| `values.yaml` | KServe vLLM | Yes | No | Llama 3.2 3B (local) |
+| `values-qwen.yaml` | KServe vLLM | Yes | No | Qwen 3.5 2B (local) |
+| `values-openai.yaml` | OpenAI API | No | Yes (`OPENAI_API_KEY`) | gpt-4o-mini |
+
+Each file configures `openclaw.json` via the `configMaps.config` section with:
+- Gateway auth (token mode, `${OPENCLAW_GATEWAY_TOKEN}` env substitution)
+- Model provider(s) with baseUrl, API type, and model list
+- Default agent model
 
 Also configures a 5Gi PVC for persistent data (conversations, device pairings).
 
+Usage:
+```bash
+# Local Llama model (default)
+bash openclaw/install-openclaw.sh
+
+# Local Qwen model
+bash openclaw/install-openclaw.sh --values values-qwen.yaml
+
+# OpenAI API (no GPU needed)
+export OPENAI_API_KEY=sk-...
+bash openclaw/install-openclaw.sh --values values-openai.yaml
+```
+
 ### `openclaw/install-openclaw.sh` — OpenClaw Installation
 
-Creates the namespace, gateway token secret, and Helm release. Uses idempotent patterns (`--dry-run=client | kubectl apply`, `helm upgrade --install`) so it's safe to re-run.
+Creates the namespace, gateway token secret (optionally including `OPENAI_API_KEY` if set), and Helm release. Uses idempotent patterns (`--dry-run=client | kubectl apply`, `helm upgrade --install`) so it's safe to re-run.
 
 ### `deploy.sh` — Master Orchestration Script
 
@@ -610,6 +632,10 @@ bash openclaw/install-openclaw.sh
 
 # For Qwen:
 bash openclaw/install-openclaw.sh --values values-qwen.yaml
+
+# For OpenAI API (no GPU needed):
+export OPENAI_API_KEY=sk-...
+bash openclaw/install-openclaw.sh --values values-openai.yaml
 ```
 
 ### Step 5: Access OpenClaw

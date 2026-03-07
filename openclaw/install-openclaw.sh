@@ -81,9 +81,17 @@ kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -
 # The browser remembers the token after the first successful access.
 # -----------------------------------------------------------------------------
 echo "--- Creating secret ---"
+SECRET_ARGS=(
+  --namespace "$NAMESPACE"
+  --from-literal=OPENCLAW_GATEWAY_TOKEN="$GATEWAY_TOKEN"
+)
+# Include OpenAI API key if provided (optional — enables OpenAI models in the UI)
+if [ -n "${OPENAI_API_KEY:-}" ]; then
+  SECRET_ARGS+=(--from-literal=OPENAI_API_KEY="$OPENAI_API_KEY")
+  echo "  Including OPENAI_API_KEY in secret"
+fi
 kubectl create secret generic openclaw-env-secret \
-  --namespace "$NAMESPACE" \
-  --from-literal=OPENCLAW_GATEWAY_TOKEN="$GATEWAY_TOKEN" \
+  "${SECRET_ARGS[@]}" \
   --dry-run=client -o yaml | kubectl apply -f -
 
 # -----------------------------------------------------------------------------

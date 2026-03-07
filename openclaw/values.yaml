@@ -1,16 +1,16 @@
 # =============================================================================
-# OpenClaw Helm Values — Configured for KServe-hosted Llama 3.2 3B
+# OpenClaw Helm Values — KServe vLLM (Llama 3.2 3B)
 # =============================================================================
 #
-# This file overrides the default OpenClaw Helm chart values to point the
-# application at our self-hosted Llama 3.2 3B model via KServe + vLLM.
+# Configures OpenClaw to use the self-hosted Llama 3.2 3B model via
+# KServe + vLLM (in-cluster). No external API keys needed.
+#
+# For OpenAI API instead, use values-openai.yaml:
+#   bash openclaw/install-openclaw.sh --values values-openai.yaml
 #
 # The chart uses bjw-s/app-template as its base, so all values are nested
 # under app-template. Model configuration lives in openclaw.json (via the
 # configMaps.config section), not environment variables.
-#
-# vLLM implements the OpenAI API spec (POST /v1/chat/completions), so we
-# register it as a custom provider with api: "openai-completions".
 # =============================================================================
 app-template:
   controllers:
