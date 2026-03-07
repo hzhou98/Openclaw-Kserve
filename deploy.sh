@@ -39,13 +39,15 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # =============================================================================
 # Model selection
 # =============================================================================
-# Supports two models:
+# Supports three modes:
 #   llama (default) — meta-llama/Llama-3.2-3B-Instruct (gated, needs license)
 #   qwen           — Qwen/Qwen3.5-2B (open, no license needed)
+#   openai         — OpenAI API (no GPU needed, requires OPENAI_API_KEY)
 #
 # Usage:
-#   ./deploy.sh               # Deploy with Llama 3.2 3B (default)
-#   ./deploy.sh --model qwen  # Deploy with Qwen 3.5 2B
+#   ./deploy.sh                 # Deploy with Llama 3.2 3B (default)
+#   ./deploy.sh --model qwen    # Deploy with Qwen 3.5 2B
+#   ./deploy.sh --model openai  # Deploy with OpenAI API (no GPU)
 # =============================================================================
 MODEL="llama"
 while [[ $# -gt 0 ]]; do
@@ -56,7 +58,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     *)
       echo "Unknown option: $1"
-      echo "Usage: ./deploy.sh [--model llama|qwen]"
+      echo "Usage: ./deploy.sh [--model llama|qwen|openai]"
       exit 1
       ;;
   esac
@@ -75,8 +77,14 @@ case "$MODEL" in
     OPENCLAW_VALUES="$ROOT_DIR/openclaw/values-qwen.yaml"
     MODEL_DISPLAY="Qwen 3.5 2B"
     ;;
+  openai)
+    ISVC_FILE=""
+    ISVC_NAME=""
+    OPENCLAW_VALUES="$ROOT_DIR/openclaw/values-openai.yaml"
+    MODEL_DISPLAY="OpenAI API (gpt-4o-mini)"
+    ;;
   *)
-    echo "ERROR: Unknown model '$MODEL'. Use 'llama' or 'qwen'."
+    echo "ERROR: Unknown model '$MODEL'. Use 'llama', 'qwen', or 'openai'."
     exit 1
     ;;
 esac
@@ -111,27 +119,35 @@ if [ ! -f "$ROOT_DIR/terraform/terraform.tfvars" ]; then
 fi
 
 # =============================================================================
-# HuggingFace token handling
+# Token handling
 # =============================================================================
-# The HF token can be provided two ways:
-#   1. Edit kserve/hf-secret.yaml directly (replace YOUR_HF_TOKEN)
-#   2. Set the HF_TOKEN environment variable (script patches the file)
-#
-# The grep check detects whether the placeholder is still in the file.
-# If the user already edited the file, we skip the env var check.
+# For local models (llama/qwen): HF token is required for model downloads.
+# For OpenAI mode: OPENAI_API_KEY is required instead.
 # =============================================================================
-if ! grep -q 'YOUR_HF_TOKEN' "$ROOT_DIR/kserve/hf-secret.yaml" 2>/dev/null; then
-  echo "Using configured HF token from hf-secret.yaml"
-else
-  if [ -z "${HF_TOKEN:-}" ]; then
-    echo "ERROR: Set your HuggingFace token."
-    echo "Either edit kserve/hf-secret.yaml or export HF_TOKEN=hf_xxx"
+if [ "$MODEL" = "openai" ]; then
+  if [ -z "${OPENAI_API_KEY:-}" ]; then
+    echo "ERROR: Set your OpenAI API key."
+    echo "  export OPENAI_API_KEY=sk-..."
     exit 1
   fi
-  # Replace the placeholder in hf-secret.yaml with the actual token.
-  # -i.bak creates a backup file (required by macOS sed), then we remove it.
-  sed -i.bak "s/YOUR_HF_TOKEN/$HF_TOKEN/" "$ROOT_DIR/kserve/hf-secret.yaml"
-  rm -f "$ROOT_DIR/kserve/hf-secret.yaml.bak"
+  echo "Using OpenAI API key from environment"
+else
+  # HF token can be provided two ways:
+  #   1. Edit kserve/hf-secret.yaml directly (replace YOUR_HF_TOKEN)
+  #   2. Set the HF_TOKEN environment variable (script patches the file)
+  if ! grep -q 'YOUR_HF_TOKEN' "$ROOT_DIR/kserve/hf-secret.yaml" 2>/dev/null; then
+    echo "Using configured HF token from hf-secret.yaml"
+  else
+    if [ -z "${HF_TOKEN:-}" ]; then
+      echo "ERROR: Set your HuggingFace token."
+      echo "Either edit kserve/hf-secret.yaml or export HF_TOKEN=hf_xxx"
+      exit 1
+    fi
+    # Replace the placeholder in hf-secret.yaml with the actual token.
+    # -i.bak creates a backup file (required by macOS sed), then we remove it.
+    sed -i.bak "s/YOUR_HF_TOKEN/$HF_TOKEN/" "$ROOT_DIR/kserve/hf-secret.yaml"
+    rm -f "$ROOT_DIR/kserve/hf-secret.yaml.bak"
+  fi
 fi
 
 # =============================================================================
@@ -181,39 +197,41 @@ echo "=== Step 2: Installing KServe ==="
 bash "$ROOT_DIR/kserve/install-kserve.sh"
 
 # =============================================================================
-# Step 3: Deploy the Llama 3.2 3B model
+# Step 3: Deploy the model (skipped for OpenAI mode)
 # =============================================================================
-# Two kubectl apply commands:
+# For local models (llama/qwen):
 #   1. hf-secret.yaml: Creates the Secret with the HuggingFace token
-#   2. llama-inferenceservice.yaml: Creates the InferenceService resource
+#   2. InferenceService YAML: Creates the KServe InferenceService resource
 #
-# When the InferenceService is created, this chain of events occurs:
-#   a. KServe controller creates a Deployment requesting 1x nvidia.com/gpu
-#   b. The pod is unschedulable (no GPU nodes exist yet, pool is at 0)
-#   c. GKE cluster autoscaler detects the unschedulable pod
-#   d. Autoscaler provisions a new n1-standard-4 + T4 spot VM (~2-5 min)
-#   e. GKE installs NVIDIA drivers on the new node (~1 min)
-#   f. Pod is scheduled, vLLM starts downloading the model from HF (~1-2 min)
-#   g. vLLM loads the model into GPU VRAM and starts serving
-#   h. KServe marks the InferenceService as Ready
+#   When the InferenceService is created, this chain of events occurs:
+#     a. KServe controller creates a Deployment requesting 1x nvidia.com/gpu
+#     b. The pod is unschedulable (no GPU nodes exist yet, pool is at 0)
+#     c. GKE cluster autoscaler detects the unschedulable pod
+#     d. Autoscaler provisions a g2-standard-4 + L4 spot VM (~2-5 min)
+#     e. GKE installs NVIDIA drivers on the new node (~1 min)
+#     f. Pod is scheduled, vLLM starts downloading the model from HF (~1-2 min)
+#     g. vLLM loads the model into GPU VRAM and starts serving
+#     h. KServe marks the InferenceService as Ready
 #
-# The kubectl wait command blocks until the InferenceService becomes Ready,
-# with a 10-minute timeout to account for GPU node provisioning. If it times
-# out, we continue anyway — the model will eventually be ready, and OpenClaw
-# can be installed in the meantime.
+# For OpenAI mode: No model to deploy — OpenClaw calls OpenAI's API directly.
 # =============================================================================
-echo ""
-echo "=== Step 3: Deploying $MODEL_DISPLAY ==="
-kubectl apply -f "$ROOT_DIR/kserve/hf-secret.yaml"
-kubectl apply -f "$ISVC_FILE"
+if [ "$MODEL" = "openai" ]; then
+  echo ""
+  echo "=== Step 3: Skipped (using OpenAI API) ==="
+else
+  echo ""
+  echo "=== Step 3: Deploying $MODEL_DISPLAY ==="
+  kubectl apply -f "$ROOT_DIR/kserve/hf-secret.yaml"
+  kubectl apply -f "$ISVC_FILE"
 
-echo "Waiting for InferenceService to become ready (this may take several minutes as GPU node scales up)..."
-kubectl wait --for=condition=Ready "inferenceservice/$ISVC_NAME" -n kserve --timeout=600s || {
-  echo "WARNING: InferenceService not ready within 10 minutes."
-  echo "Check status: kubectl get inferenceservice -n kserve"
-  echo "Check pods: kubectl get pods -n kserve"
-  echo "Continuing with OpenClaw install anyway..."
-}
+  echo "Waiting for InferenceService to become ready (this may take several minutes as GPU node scales up)..."
+  kubectl wait --for=condition=Ready "inferenceservice/$ISVC_NAME" -n kserve --timeout=600s || {
+    echo "WARNING: InferenceService not ready within 10 minutes."
+    echo "Check status: kubectl get inferenceservice -n kserve"
+    echo "Check pods: kubectl get pods -n kserve"
+    echo "Continuing with OpenClaw install anyway..."
+  }
+fi
 
 # =============================================================================
 # Step 4: Install OpenClaw
@@ -230,16 +248,21 @@ echo ""
 echo "=== Step 4: Installing OpenClaw ==="
 bash "$ROOT_DIR/openclaw/install-openclaw.sh" --values "$OPENCLAW_VALUES"
 
+GATEWAY_TOKEN=$(kubectl get secret openclaw-env-secret -n openclaw -o jsonpath='{.data.OPENCLAW_GATEWAY_TOKEN}' | base64 -d 2>/dev/null || echo "UNKNOWN")
+
 echo ""
 echo "============================================"
 echo "  Deployment Complete!"
+echo "  Model: $MODEL_DISPLAY"
 echo "============================================"
 echo ""
 echo "Verify:"
-echo "  kubectl get pods -n kserve"
-echo "  kubectl get inferenceservice -n kserve"
+if [ "$MODEL" != "openai" ]; then
+  echo "  kubectl get pods -n kserve"
+  echo "  kubectl get inferenceservice -n kserve"
+fi
 echo "  kubectl get pods -n openclaw"
 echo ""
 echo "Access OpenClaw:"
 echo "  kubectl port-forward -n openclaw svc/openclaw 18789:18789"
-echo "  Open http://localhost:18789"
+echo "  Open http://localhost:18789/?token=$GATEWAY_TOKEN"
