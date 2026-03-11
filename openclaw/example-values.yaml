@@ -1,0 +1,85 @@
+# =============================================================================
+# OpenClaw Helm Values — Example Template for Custom Models
+# =============================================================================
+#
+# Use this alongside kserve/example-inferenceservice.yaml to add a new model.
+#
+# Steps:
+#   1. Copy this file: cp example-values.yaml values-mymodel.yaml
+#   2. Update the baseUrl to match your InferenceService name:
+#        http://<isvc-name>-predictor.kserve.svc.cluster.local/v1
+#   3. Update models[].id to exactly match the HuggingFace model ID
+#      (must match what vLLM reports via GET /v1/models)
+#   4. Update models[].name to a friendly display name
+#   5. Update agents.defaults.model.primary to "<provider>/<model-id>"
+#   6. Deploy:
+#        bash openclaw/install-openclaw.sh --values openclaw/values-mymodel.yaml
+#
+# To add skills, compose with values-skills.yaml:
+#   bash openclaw/install-openclaw.sh \
+#     --values openclaw/values-mymodel.yaml \
+#     --values openclaw/values-skills.yaml
+# =============================================================================
+app-template:
+  controllers:
+    main:
+      containers:
+        main:
+          envFrom:
+            - secretRef:
+                name: openclaw-env-secret
+
+  configMaps:
+    config:
+      enabled: true
+      data:
+        openclaw.json: |
+          {
+            "gateway": {
+              "port": 18789,
+              "mode": "local",
+              "auth": {
+                "mode": "token",
+                "token": "${OPENCLAW_GATEWAY_TOKEN}"
+              },
+              "controlUi": {
+                "dangerouslyAllowHostHeaderOriginFallback": true
+              }
+            },
+            "models": {
+              "mode": "merge",
+              "providers": {
+                "kserve-vllm": {
+                  "_comment_baseUrl": "CHANGE: Replace 'my-model' with your InferenceService name",
+                  "baseUrl": "http://my-model-predictor.kserve.svc.cluster.local/v1",
+                  "api": "openai-completions",
+                  "apiKey": "dummy",
+                  "models": [
+                    {
+                      "_comment_id": "CHANGE: Must exactly match the HuggingFace model ID",
+                      "id": "<org>/<model-name>",
+                      "name": "My Model (KServe)",
+                      "reasoning": false,
+                      "input": ["text"],
+                      "contextWindow": 8192,
+                      "maxTokens": 4096
+                    }
+                  ]
+                }
+              }
+            },
+            "agents": {
+              "defaults": {
+                "model": {
+                  "_comment": "CHANGE: Format is 'provider-name/model-id'",
+                  "primary": "kserve-vllm/<org>/<model-name>"
+                }
+              }
+            }
+          }
+
+  persistence:
+    data:
+      enabled: true
+      size: 5Gi
+      accessMode: ReadWriteOnce

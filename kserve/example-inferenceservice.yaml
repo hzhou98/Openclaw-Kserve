@@ -1,0 +1,105 @@
+# =============================================================================
+# KServe InferenceService — Example Template for Custom Models
+# =============================================================================
+#
+# Use this as a starting point to deploy any HuggingFace model via KServe + vLLM.
+#
+# Steps to add a new model:
+#   1. Copy this file: cp example-inferenceservice.yaml mymodel-inferenceservice.yaml
+#   2. Update metadata.name (must be DNS-safe: lowercase, hyphens, no dots)
+#   3. Update --model arg to the HuggingFace model ID
+#   4. Adjust --max_model_len based on your GPU's VRAM
+#   5. Adjust resource requests/limits if needed
+#   6. Create a matching openclaw/values-mymodel.yaml (see example-values.yaml)
+#   7. Deploy:
+#        kubectl apply -f kserve/hf-secret.yaml
+#        kubectl apply -f kserve/mymodel-inferenceservice.yaml
+#        bash openclaw/install-openclaw.sh --values openclaw/values-mymodel.yaml
+#
+# Finding models on HuggingFace:
+#   - Browse: https://huggingface.co/models?pipeline_tag=text-generation
+#   - vLLM supported models: https://docs.vllm.ai/en/latest/models/supported_models.html
+#   - Look for models with "Instruct" or "Chat" in the name for agent/chat use
+#
+# VRAM estimation (FP16, approximate):
+#   - 1B params ≈ 2GB VRAM
+#   - 3B params ≈ 6GB VRAM
+#   - 7B params ≈ 14GB VRAM
+#   - 13B params ≈ 26GB VRAM (needs A100 or multiple GPUs)
+#   Plus KV-cache overhead — reduce --max_model_len if you run out of VRAM.
+#
+# Popular models that fit on a single NVIDIA L4 (24GB VRAM):
+#   - meta-llama/Llama-3.2-3B-Instruct     (3B, ~6GB, gated)
+#   - meta-llama/Llama-3.2-1B-Instruct     (1B, ~2GB, gated)
+#   - Qwen/Qwen3.5-2B                      (2B, ~4GB, open)
+#   - Qwen/Qwen2.5-7B-Instruct             (7B, ~14GB, open)
+#   - mistralai/Mistral-7B-Instruct-v0.3   (7B, ~14GB, open)
+#   - google/gemma-2-2b-it                  (2B, ~4GB, open)
+#   - google/gemma-2-9b-it                  (9B, ~18GB, open)
+#   - microsoft/Phi-3.5-mini-instruct      (3.8B, ~8GB, open)
+#   - TinyLlama/TinyLlama-1.1B-Chat-v1.0   (1.1B, ~2GB, open)
+#
+# Gated vs open models:
+#   - Gated: Requires accepting a license on HuggingFace + HF_TOKEN
+#   - Open: Only needs HF_TOKEN for faster downloads (avoids rate limits)
+#
+# =============================================================================
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  # ┌─────────────────────────────────────────────────────────────────────────┐
+  # │ CHANGE THIS: Pick a short DNS-safe name for your model.               │
+  # │ This becomes the KServe Service name: <name>-predictor.kserve.svc     │
+  # │ Examples: "mistral-7b", "gemma-2b", "phi-3-mini"                      │
+  # └─────────────────────────────────────────────────────────────────────────┘
+  name: my-model
+  namespace: kserve
+spec:
+  predictor:
+    model:
+      modelFormat:
+        name: huggingface
+      runtime: kserve-huggingfaceserver
+      env:
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-secret
+              key: HF_TOKEN
+      args:
+        # ┌───────────────────────────────────────────────────────────────────┐
+        # │ CHANGE THIS: Set to the HuggingFace model ID.                   │
+        # │ Find model IDs at https://huggingface.co/models                 │
+        # │ Example: "mistralai/Mistral-7B-Instruct-v0.3"                   │
+        # └───────────────────────────────────────────────────────────────────┘
+        - "--model=<org>/<model-name>"
+        # ┌───────────────────────────────────────────────────────────────────┐
+        # │ ADJUST THIS: Maximum sequence length (input + output tokens).   │
+        # │ Lower = less VRAM for KV-cache. Raise if you need long context. │
+        # │ Start with 4096 for small models, 8192 for 3B+, 4096 for 7B+.  │
+        # └───────────────────────────────────────────────────────────────────┘
+        - "--max_model_len=8192"
+        # ┌───────────────────────────────────────────────────────────────────┐
+        # │ OPTIONAL: Additional vLLM args. Uncomment as needed.            │
+        # └───────────────────────────────────────────────────────────────────┘
+        # - "--dtype=float16"           # Force FP16 (default: auto)
+        # - "--quantization=awq"        # Use AWQ quantization (if model supports it)
+        # - "--gpu-memory-utilization=0.9"  # Max fraction of GPU memory to use
+        # - "--tensor-parallel-size=1"  # Number of GPUs (1 for single L4)
+        # - "--enforce-eager"           # Disable CUDA graphs (saves memory, slower)
+      resources:
+        limits:
+          cpu: "4"
+          memory: 16Gi
+          nvidia.com/gpu: "1"
+        requests:
+          cpu: "2"
+          memory: 8Gi
+          nvidia.com/gpu: "1"
+    tolerations:
+      - key: nvidia.com/gpu
+        operator: Equal
+        value: present
+        effect: NoSchedule
+    nodeSelector:
+      pool: gpu

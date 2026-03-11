@@ -50,6 +50,7 @@ kubectl port-forward -n openclaw svc/openclaw 18789:18789
 | Llama 3.2 3B Instruct | `--model llama` (default) | L4 (6GB VRAM) | ~25 min |
 | Qwen 3.5 2B | `--model qwen` | L4 (4GB VRAM) | ~25 min |
 | OpenAI API (gpt-4o-mini) | `--model openai` | None | ~10 min |
+| Custom model | See [docs/custom-models.md](docs/custom-models.md) | Varies | ~25 min |
 
 OpenAI mode skips KServe, Istio, and cert-manager entirely — OpenClaw calls the API directly.
 
@@ -65,13 +66,15 @@ OpenAI mode skips KServe, Istio, and cert-manager entirely — OpenClaw calls th
 │   ├── install-kserve.sh        # cert-manager + Istio + KServe
 │   ├── hf-secret.yaml           # HuggingFace token
 │   ├── llama-inferenceservice.yaml
-│   └── qwen-inferenceservice.yaml
+│   ├── qwen-inferenceservice.yaml
+│   └── example-inferenceservice.yaml  # Template for custom models
 ├── openclaw/
 │   ├── install-openclaw.sh      # OpenClaw Helm install
 │   ├── values.yaml              # Llama config
 │   ├── values-qwen.yaml         # Qwen config
 │   ├── values-openai.yaml       # OpenAI config
-│   └── values-skills.yaml       # Skills overlay (composable)
+│   ├── values-skills.yaml       # Skills overlay (composable)
+│   └── example-values.yaml      # Template for custom models
 ├── helm-chart/                  # Single Helm chart (alternative)
 ├── argocd/                      # GitOps deployment (optional)
 └── docs/                        # Detailed documentation
@@ -132,4 +135,5 @@ See [docs/troubleshooting.md](docs/troubleshooting.md) for full FAQ.
 | [Helm Chart](docs/helm-chart.md) | Single Helm chart alternative to scripts |
 | [ArgoCD](docs/argocd.md) | GitOps deployment with ArgoCD |
 | [Operations](docs/operations.md) | Cost management, stop/start, teardown |
+| [Custom Models](docs/custom-models.md) | Add your own HuggingFace model |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and FAQ |
