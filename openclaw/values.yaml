@@ -8,6 +8,9 @@
 # For OpenAI API instead, use values-openai.yaml:
 #   bash openclaw/install-openclaw.sh --values values-openai.yaml
 #
+# To add skills, compose with values-skills.yaml:
+#   bash openclaw/install-openclaw.sh --values values.yaml --values values-skills.yaml
+#
 # The chart uses bjw-s/app-template as its base, so all values are nested
 # under app-template. Model configuration lives in openclaw.json (via the
 # configMaps.config section), not environment variables.

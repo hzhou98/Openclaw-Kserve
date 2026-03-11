@@ -347,7 +347,9 @@ cat terraform/terraform.tfvars               # project_id set correctly
 
 ## Time Estimates
 
-### First-time deployment (end-to-end): ~25-40 minutes
+### First-time deployment (end-to-end)
+
+**Local models (llama/qwen): ~25-40 minutes**
 
 | Step | What happens | Time |
 |------|-------------|------|
@@ -367,7 +369,18 @@ cat terraform/terraform.tfvars               # project_id set correctly
 | **OpenClaw install** | Helm chart + wait for pod Ready | ~1-2 min |
 | **Total** | | **~25-40 min** |
 
-*GPU quota for new accounts can take 24-48 hours. Established accounts are usually approved within minutes.
+**OpenAI API mode: ~10-15 minutes**
+
+| Step | What happens | Time |
+|------|-------------|------|
+| **GCP setup** (`setup-gcp.sh`) | Auth, create project, enable APIs | ~3-5 min |
+| **Terraform** | GKE cluster + system pool (no GPU quota needed) | **~8-12 min** |
+| ~~KServe install~~ | *Skipped — not needed for OpenAI API* | — |
+| ~~Model deploy~~ | *Skipped — OpenClaw calls OpenAI API directly* | — |
+| **OpenClaw install** | Helm chart + wait for pod Ready | ~1-2 min |
+| **Total** | | **~10-15 min** |
+
+*GPU quota for new accounts can take 24-48 hours. Established accounts are usually approved within minutes. Not needed for OpenAI mode.
 
 ### Subsequent operations
 
@@ -401,12 +414,13 @@ export HF_TOKEN=hf_your_token_here
 
 # 2. Deploy everything (~25-40 min)
 chmod +x deploy.sh kserve/install-kserve.sh openclaw/install-openclaw.sh
-./deploy.sh                # Uses Llama 3.2 3B (default)
-# ./deploy.sh --model qwen  # Use Qwen 3.5 2B if Llama license not approved
+./deploy.sh                         # Uses Llama 3.2 3B (default)
+# ./deploy.sh --model qwen            # Use Qwen 3.5 2B if Llama license not approved
+# ./deploy.sh --model llama --skills  # Llama + ClawHub skills
 
-# OR: Skip GPU entirely and use OpenAI API
+# OR: Use OpenAI API (no GPU, no KServe — faster deploy ~10-15 min)
 export OPENAI_API_KEY=sk-...
-bash openclaw/install-openclaw.sh --values values-openai.yaml
+./deploy.sh --model openai
 ```
 
 ## File-by-File Explanation
@@ -491,20 +505,22 @@ When applied, this triggers: KServe creates Deployment → pod unschedulable →
 
 ### `openclaw/values*.yaml` — OpenClaw Helm Configuration
 
-Three values files for different model backends:
+Composable values files — model configs and skills are separate so you can mix and match:
 
-| File | Provider | GPU needed | API key needed | Default model |
-|------|----------|-----------|----------------|---------------|
-| `values.yaml` | KServe vLLM | Yes | No | Llama 3.2 3B (local) |
-| `values-qwen.yaml` | KServe vLLM | Yes | No | Qwen 3.5 2B (local) |
-| `values-openai.yaml` | OpenAI API | No | Yes (`OPENAI_API_KEY`) | gpt-4o-mini |
+| File | Purpose | GPU needed | API key needed |
+|------|---------|-----------|----------------|
+| `values.yaml` | Llama 3.2 3B via KServe vLLM | Yes | No |
+| `values-qwen.yaml` | Qwen 3.5 2B via KServe vLLM | Yes | No |
+| `values-openai.yaml` | OpenAI API (gpt-4o-mini) | No | Yes (`OPENAI_API_KEY`) |
+| `values-skills.yaml` | ClawHub skills overlay | — | — |
 
-Each file configures `openclaw.json` via the `configMaps.config` section with:
+**Model files** configure `openclaw.json` via the `configMaps.config` section with:
 - Gateway auth (token mode, `${OPENCLAW_GATEWAY_TOKEN}` env substitution)
 - Model provider(s) with baseUrl, API type, and model list
 - Default agent model
+- 5Gi PVC for persistent data (conversations, device pairings)
 
-Also configures a 5Gi PVC for persistent data (conversations, device pairings).
+**`values-skills.yaml`** is a composable overlay that adds an `init-skills` init container and persistence mounts. Apply it alongside any model file — Helm deep-merges multiple `-f` files left-to-right.
 
 Usage:
 ```bash
@@ -517,11 +533,15 @@ bash openclaw/install-openclaw.sh --values values-qwen.yaml
 # OpenAI API (no GPU needed)
 export OPENAI_API_KEY=sk-...
 bash openclaw/install-openclaw.sh --values values-openai.yaml
+
+# Any model + skills (compose with values-skills.yaml)
+bash openclaw/install-openclaw.sh --values values.yaml --values values-skills.yaml
+bash openclaw/install-openclaw.sh --values values-qwen.yaml --values values-skills.yaml
 ```
 
 ### `openclaw/install-openclaw.sh` — OpenClaw Installation
 
-Creates the namespace, gateway token secret (optionally including `OPENAI_API_KEY` if set), and Helm release. Uses idempotent patterns (`--dry-run=client | kubectl apply`, `helm upgrade --install`) so it's safe to re-run.
+Creates the namespace, gateway token secret (optionally including `OPENAI_API_KEY` if set), and Helm release. Accepts one or more `--values` flags — Helm deep-merges them left-to-right, so overlays like `values-skills.yaml` should come after the base model file. Uses idempotent patterns (`--dry-run=client | kubectl apply`, `helm upgrade --install`) so it's safe to re-run.
 
 ### `deploy.sh` — Master Orchestration Script
 
@@ -531,6 +551,12 @@ Runs all steps sequentially with pre-flight checks:
 3. Handles HF token (from env var or pre-edited file)
 4. Runs Terraform → KServe install → model deploy → OpenClaw install
 5. Waits up to 10 minutes for the model to become ready
+
+For OpenAI mode, steps 2 (KServe) and 3 (model deploy) are skipped entirely — OpenClaw calls the OpenAI API directly, so cert-manager, Istio, and KServe are not installed. This saves ~3-5 min deploy time and ~500MB RAM on the system pool.
+
+Flags:
+- `--model llama|qwen|openai` — Select the model backend (default: interactive prompt)
+- `--skills` — Enable ClawHub skill installation (applies `values-skills.yaml`)
 
 ## Manual Step-by-Step
 
@@ -550,7 +576,9 @@ eval "$(terraform output -raw get_credentials_command)"
 cd ..
 ```
 
-### Step 2: Install KServe
+### Step 2: Install KServe (skip for OpenAI mode)
+
+If using OpenAI API, skip this step entirely and go to Step 4.
 
 ```bash
 bash kserve/install-kserve.sh
@@ -561,9 +589,9 @@ kubectl get pods -n istio-system    # istiod-*, istio-ingressgateway-*
 kubectl get pods -n kserve          # kserve-controller-manager-*
 ```
 
-### Step 3: Deploy the LLM
+### Step 3: Deploy the LLM (skip for OpenAI mode)
 
-You have two model options:
+If using OpenAI API, skip this step and go to Step 4. You have two model options:
 
 | Model | Params | VRAM | Gated? | Notes |
 |-------|--------|------|--------|-------|
@@ -603,8 +631,10 @@ kubectl get inferenceservice -n kserve -w
 **Using deploy.sh with model selection:**
 
 ```bash
-./deploy.sh                # Default: Llama 3.2 3B
-./deploy.sh --model qwen   # Alternative: Qwen 3.5 2B
+./deploy.sh                         # Default: Llama 3.2 3B
+./deploy.sh --model qwen            # Alternative: Qwen 3.5 2B
+./deploy.sh --model llama --skills  # Llama + ClawHub skills
+./deploy.sh --model qwen --skills   # Qwen + ClawHub skills
 ```
 
 ### Step 4: Deploy OpenClaw
@@ -620,6 +650,9 @@ bash openclaw/install-openclaw.sh --values values-qwen.yaml
 # For OpenAI API (no GPU needed):
 export OPENAI_API_KEY=sk-...
 bash openclaw/install-openclaw.sh --values values-openai.yaml
+
+# Any model + skills (compose multiple --values):
+bash openclaw/install-openclaw.sh --values values.yaml --values values-skills.yaml
 ```
 
 ### Step 5: Access OpenClaw
@@ -761,6 +794,100 @@ The browser remembers the token after the first successful access.
 
 ```bash
 kubectl get secret openclaw-env-secret -n openclaw -o jsonpath='{.data.OPENCLAW_GATEWAY_TOKEN}' | base64 -d
+```
+
+## Skills
+
+OpenClaw supports **skills** — installable plugins from [ClawHub](https://clawhub.com) that extend the agent's capabilities (e.g., weather lookups, web search, calendar integration). Skills configuration lives in a separate composable file (`openclaw/values-skills.yaml`) that can be layered on top of any model config.
+
+### Usage
+
+Apply `values-skills.yaml` alongside your model values file (Helm deep-merges multiple `-f` files left-to-right):
+
+```bash
+# Llama + skills
+bash openclaw/install-openclaw.sh --values values.yaml --values values-skills.yaml
+
+# Qwen + skills
+bash openclaw/install-openclaw.sh --values values-qwen.yaml --values values-skills.yaml
+
+# OpenAI + skills
+bash openclaw/install-openclaw.sh --values values-openai.yaml --values values-skills.yaml
+```
+
+Or with Helm directly:
+
+```bash
+helm upgrade openclaw openclaw/openclaw -n openclaw \
+  -f openclaw/values.yaml -f openclaw/values-skills.yaml
+```
+
+### How it works
+
+1. `values-skills.yaml` defines an `init-skills` init container that runs before the main OpenClaw pod.
+2. The init container runs `npx clawhub install <skill>` for each skill in the list.
+3. Skills are installed to `/home/node/.openclaw/workspace/skills/` on the persistent volume, so they survive pod restarts.
+4. If a skill is already installed, it is skipped (idempotent).
+5. Failed installs retry up to 6 times with exponential backoff.
+
+### Adding skills
+
+Edit the `for skill in ...` line in `openclaw/values-skills.yaml`:
+
+```yaml
+# ── Add skill slugs here ──
+for skill in weather; do
+  install_skill "$skill" || true
+done
+```
+
+To add more skills, append their slugs (the name shown on [ClawHub](https://clawhub.com)):
+
+```yaml
+for skill in weather gog web-search calendar; do
+  install_skill "$skill" || true
+done
+```
+
+Then redeploy:
+
+```bash
+bash openclaw/install-openclaw.sh --values values.yaml --values values-skills.yaml
+```
+
+### Removing skills
+
+1. Remove the skill slug from the `for skill in ...` line in `openclaw/values-skills.yaml`.
+2. Delete the skill directory from the PVC:
+
+```bash
+kubectl exec -n openclaw deployment/openclaw -c main -- rm -rf /home/node/.openclaw/workspace/skills/<skill-name>
+```
+
+3. Restart the pod:
+
+```bash
+kubectl rollout restart deployment/openclaw -n openclaw
+```
+
+### Listing installed skills
+
+```bash
+kubectl exec -n openclaw deployment/openclaw -c main -- ls /home/node/.openclaw/workspace/skills/
+```
+
+### Runtime dependencies
+
+Some skills require additional runtimes (Python, pnpm, etc.) not included in the base image. Since all containers run with a read-only root filesystem, extra tooling must be installed to the PVC. See the commented examples in the upstream chart's `init-skills` command for installing [uv](https://github.com/astral-sh/uv) (Python) or [pnpm](https://pnpm.io/) (Node.js). For details, see [docs/skills.md](docs/skills.md).
+
+### File layout
+
+```
+openclaw/
+├── values.yaml              # Llama 3.2 3B model config
+├── values-qwen.yaml         # Qwen 3.5 2B model config
+├── values-openai.yaml       # OpenAI API model config
+└── values-skills.yaml       # Skills overlay (compose with any model file)
 ```
 
 ## Helm Chart (Alternative to Scripts)

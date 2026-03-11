@@ -47,13 +47,18 @@ NAMESPACE="openclaw"
 # The token is printed at the end — save it for device pairing.
 GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN:-$(openssl rand -hex 16)}"
 
-# Accept an optional --values flag to specify which values file to use.
-# Defaults to values.yaml (Llama). Use values-qwen.yaml for Qwen.
-# Usage: bash install-openclaw.sh --values values-qwen.yaml
-VALUES_FILE=""
+# Accept one or more --values flags to specify which values files to use.
+# Helm deep-merges multiple -f files left-to-right, so overlays (like
+# values-skills.yaml) should come after the base model file.
+#
+# Usage:
+#   bash install-openclaw.sh                                          # defaults to values.yaml
+#   bash install-openclaw.sh --values values-qwen.yaml                # Qwen model
+#   bash install-openclaw.sh --values values.yaml --values values-skills.yaml  # Llama + skills
+VALUES_FILES=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --values) VALUES_FILE="$2"; shift 2 ;;
+    --values) VALUES_FILES+=("$2"); shift 2 ;;
     *) shift ;;
   esac
 done
@@ -113,20 +118,33 @@ helm repo add openclaw https://serhanekicii.github.io/openclaw-helm --force-upda
 helm repo update openclaw
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Use the specified values file, or default to values.yaml
-if [ -n "$VALUES_FILE" ]; then
-  # If it's a relative path, resolve it relative to the openclaw/ directory
-  if [[ "$VALUES_FILE" != /* ]]; then
-    VALUES_FILE="$SCRIPT_DIR/$VALUES_FILE"
-  fi
+
+# If no --values flags were provided, default to values.yaml
+if [ ${#VALUES_FILES[@]} -eq 0 ]; then
+  VALUES_FILES=("$SCRIPT_DIR/values.yaml")
 else
-  VALUES_FILE="$SCRIPT_DIR/values.yaml"
+  # Resolve relative paths relative to the openclaw/ directory
+  resolved=()
+  for f in "${VALUES_FILES[@]}"; do
+    if [[ "$f" != /* ]]; then
+      resolved+=("$SCRIPT_DIR/$f")
+    else
+      resolved+=("$f")
+    fi
+  done
+  VALUES_FILES=("${resolved[@]}")
 fi
-echo "Using values file: $VALUES_FILE"
+
+# Build Helm --values flags
+HELM_VALUES_ARGS=()
+for f in "${VALUES_FILES[@]}"; do
+  echo "Using values file: $f"
+  HELM_VALUES_ARGS+=(--values "$f")
+done
 
 helm upgrade --install openclaw openclaw/openclaw \
   --namespace "$NAMESPACE" \
-  --values "$VALUES_FILE" \
+  "${HELM_VALUES_ARGS[@]}" \
   --wait --timeout 5m
 
 echo ""

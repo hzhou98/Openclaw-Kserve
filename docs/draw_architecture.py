@@ -7,9 +7,9 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
 
-fig, ax = plt.subplots(1, 1, figsize=(18, 13))
+fig, ax = plt.subplots(1, 1, figsize=(18, 14))
 ax.set_xlim(0, 18)
-ax.set_ylim(0, 13)
+ax.set_ylim(-1.0, 13.5)
 ax.axis("off")
 fig.patch.set_facecolor("#FAFBFC")
 
@@ -28,6 +28,7 @@ C_VLLM     = "#FBE9E7"  # light orange
 C_BROWSER  = "#EDE7F6"  # light purple
 C_ARROW    = "#455A64"  # dark grey
 C_TITLE    = "#1A237E"  # dark blue
+C_OPENAI   = "#10A37F"  # OpenAI green
 
 
 def rounded_box(x, y, w, h, label, facecolor, edgecolor, lw=1.5,
@@ -54,7 +55,7 @@ def rounded_box(x, y, w, h, label, facecolor, edgecolor, lw=1.5,
 
 
 def arrow(x1, y1, x2, y2, label="", color=C_ARROW, style="->",
-          connectionstyle="arc3,rad=0", fontsize=7.5):
+          connectionstyle="arc3,rad=0", fontsize=7.5, label_offset=0.18):
     """Draw an arrow with optional label."""
     ax.annotate(
         "", xy=(x2, y2), xytext=(x1, y1),
@@ -66,7 +67,7 @@ def arrow(x1, y1, x2, y2, label="", color=C_ARROW, style="->",
     )
     if label:
         mx, my = (x1 + x2) / 2, (y1 + y2) / 2
-        ax.text(mx, my + 0.18, label, ha="center", va="center",
+        ax.text(mx, my + label_offset, label, ha="center", va="center",
                 fontsize=fontsize, color=color, zorder=5,
                 bbox=dict(boxstyle="round,pad=0.15", fc="#FFFFFF",
                           ec="none", alpha=0.85))
@@ -75,65 +76,76 @@ def arrow(x1, y1, x2, y2, label="", color=C_ARROW, style="->",
 # ═══════════════════════════════════════════════════════════════
 # Title
 # ═══════════════════════════════════════════════════════════════
-ax.text(9, 12.6, "OpenClaw + KServe on GKE  —  System Architecture",
+ax.text(9, 13.1, "OpenClaw + KServe on GKE  —  System Architecture",
         ha="center", va="center", fontsize=16, fontweight="bold",
         color=C_TITLE)
 
 # ═══════════════════════════════════════════════════════════════
 # GCP outer box
 # ═══════════════════════════════════════════════════════════════
-rounded_box(0.5, 1.0, 17, 11.0, "", C_GCP, C_GCP_B, lw=2.5, alpha=0.35)
-ax.text(1.2, 11.7, "Google Cloud Platform", fontsize=11,
+rounded_box(0.5, 1.0, 17, 11.5, "", C_GCP, C_GCP_B, lw=2.5, alpha=0.35)
+ax.text(1.2, 12.2, "Google Cloud Platform", fontsize=11,
         fontweight="bold", color=C_GCP_B, zorder=5)
 
 # ═══════════════════════════════════════════════════════════════
 # GKE Cluster box
 # ═══════════════════════════════════════════════════════════════
-rounded_box(1.0, 1.5, 16, 9.8, "", C_CLUSTER, C_CLUSTER_B, lw=2, alpha=0.3)
-ax.text(1.7, 11.0, "GKE Cluster  (Terraform-managed)", fontsize=10,
+rounded_box(1.0, 1.5, 16, 10.3, "", C_CLUSTER, C_CLUSTER_B, lw=2, alpha=0.3)
+ax.text(1.7, 11.5, "GKE Cluster  (Terraform-managed)", fontsize=10,
         fontweight="bold", color=C_CLUSTER_B, zorder=5)
 
 # ═══════════════════════════════════════════════════════════════
 # System Node Pool
 # ═══════════════════════════════════════════════════════════════
-rounded_box(1.5, 5.0, 15, 5.6, "", C_SYS_POOL, C_SYS_B, lw=1.5, alpha=0.35)
-ax.text(2.2, 10.3, "System Node Pool  (e2-standard-2, spot, 1-4 nodes)",
+rounded_box(1.5, 5.0, 15, 6.1, "", C_SYS_POOL, C_SYS_B, lw=1.5, alpha=0.35)
+ax.text(2.2, 10.8, "System Node Pool  (e2-standard-2, spot, 1-4 nodes)",
         fontsize=9, fontweight="bold", color="#E65100", zorder=5)
 
 # ── cert-manager ──
-rounded_box(2.0, 8.6, 3.0, 1.3, "cert-manager", C_COMP, "#78909C",
+rounded_box(2.0, 9.2, 3.0, 1.3, "cert-manager", C_COMP, "#78909C",
             sublabel="TLS certificate\nmanagement")
 
 # ── Istio ──
-rounded_box(5.5, 8.6, 3.0, 1.3, "Istio", C_COMP, "#1565C0",
+rounded_box(5.5, 9.2, 3.0, 1.3, "Istio", C_COMP, "#1565C0",
             sublabel="istiod + Ingress\nGateway (LB)")
 
 # ── KServe Controller ──
-rounded_box(9.0, 8.6, 3.5, 1.3, "KServe Controller", C_COMP, "#2E7D32",
+rounded_box(9.0, 9.2, 3.5, 1.3, "KServe Controller", C_COMP, "#2E7D32",
             sublabel="Watches InferenceService\nCreates Deployments")
 
-# ── Namespaces legend (small) ──
-rounded_box(13.0, 8.6, 3.0, 1.3, "Namespaces", C_COMP, "#78909C",
-            sublabel="cert-manager | istio-system\nkserve | openclaw", fontsize=9)
+# ── "Local models only" annotation ──
+ax.text(14.5, 9.85, "Local models only\n(llama/qwen)", fontsize=8,
+        ha="center", va="center", color="#78909C", style="italic", zorder=5,
+        bbox=dict(boxstyle="round,pad=0.2", fc="#F5F5F5", ec="#BDBDBD",
+                  alpha=0.9))
 
 # ── OpenClaw Pod ──
-rounded_box(2.0, 5.5, 5.5, 2.5, "", C_OPENCLAW, "#1976D2", lw=1.5, alpha=0.6)
-ax.text(4.75, 7.7, "OpenClaw  (ns: openclaw)", fontsize=10,
+rounded_box(2.0, 5.5, 7.0, 3.2, "", C_OPENCLAW, "#1976D2", lw=1.5, alpha=0.6)
+ax.text(5.5, 8.4, "OpenClaw  (ns: openclaw)", fontsize=10,
         fontweight="bold", color="#0D47A1", ha="center", zorder=5)
 
-rounded_box(2.3, 6.2, 2.5, 1.1, "Node.js Gateway", C_COMP, "#1976D2",
+rounded_box(2.3, 7.0, 2.5, 1.1, "Node.js Gateway", C_COMP, "#1976D2",
             sublabel="Port 18789", fontsize=9)
-rounded_box(5.1, 6.2, 2.1, 1.1, "5Gi PVC", C_COMP, "#1976D2",
+rounded_box(5.1, 7.0, 1.6, 1.1, "5Gi PVC", C_COMP, "#1976D2",
             sublabel="Chat history\nDevice pairs", fontsize=9)
+rounded_box(7.0, 7.0, 1.8, 1.1, "init-skills", C_COMP, "#1976D2",
+            sublabel="ClawHub\nskills (opt.)", fontsize=8)
+
+# ── OpenClaw routing: two paths ──
+# Path label inside OpenClaw box
+rounded_box(2.3, 5.7, 6.4, 1.0, "", "#E3F2FD", "#1976D2", lw=0.8, alpha=0.3)
+ax.text(5.5, 6.2, "LLM routing: KServe in-cluster  OR  OpenAI API (internet)",
+        ha="center", va="center", fontsize=7.5, color="#1565C0", zorder=5,
+        style="italic")
 
 # ── KServe InferenceService info ──
-rounded_box(8.5, 5.5, 7.5, 2.5, "", "#FFF3E0", "#EF6C00", lw=1.5, alpha=0.5)
-ax.text(12.25, 7.7, "KServe InferenceService  (ns: kserve)", fontsize=10,
+rounded_box(9.5, 5.5, 6.5, 2.5, "", "#FFF3E0", "#EF6C00", lw=1.5, alpha=0.5)
+ax.text(12.75, 7.7, "KServe InferenceService  (ns: kserve)", fontsize=10,
         fontweight="bold", color="#BF360C", ha="center", zorder=5)
 
-rounded_box(8.8, 6.1, 3.2, 1.2, "K8s Service", C_COMP, "#EF6C00",
+rounded_box(9.8, 6.1, 3.0, 1.2, "K8s Service", C_COMP, "#EF6C00",
             sublabel="llama-3-2b-predictor\n.kserve.svc:80", fontsize=9)
-rounded_box(12.3, 6.1, 3.4, 1.2, "HF Secret", C_COMP, "#EF6C00",
+rounded_box(13.1, 6.1, 2.6, 1.2, "HF Secret", C_COMP, "#EF6C00",
             sublabel="HuggingFace token\nfor model download", fontsize=9)
 
 # ═══════════════════════════════════════════════════════════════
@@ -162,38 +174,59 @@ rounded_box(9.3, 2.3, 2.0, 1.1, "Llama 3.2 3B", C_COMP, "#3949AB",
             sublabel="~6GB FP16\nGated (HF token)", fontsize=8.5)
 rounded_box(11.5, 2.3, 2.0, 1.1, "Qwen 3.5 2B", C_COMP, "#3949AB",
             sublabel="~4GB FP16\nOpen model", fontsize=8.5)
-rounded_box(13.7, 2.3, 2.0, 1.1, "OpenAI API", C_COMP, "#3949AB",
-            sublabel="gpt-4o-mini\nNo GPU needed", fontsize=8.5)
+rounded_box(13.7, 2.3, 2.0, 1.1, "OpenAI API", C_COMP, C_OPENAI,
+            sublabel="gpt-4o-mini\nNo GPU/KServe", fontsize=8.5)
 
 # ═══════════════════════════════════════════════════════════════
 # Browser (outside cluster)
 # ═══════════════════════════════════════════════════════════════
-rounded_box(0.3, 0.0, 3.0, 0.8, "Browser", C_BROWSER, "#7B1FA2",
+rounded_box(0.3, -0.8, 3.0, 0.8, "Browser", C_BROWSER, "#7B1FA2",
             fontsize=11, fontweight="bold",
             sublabel="localhost:18789")
+
+# ═══════════════════════════════════════════════════════════════
+# OpenAI API (outside cluster)
+# ═══════════════════════════════════════════════════════════════
+rounded_box(14.5, -0.8, 3.0, 0.8, "OpenAI API", "#E8F5E9", C_OPENAI,
+            fontsize=11, fontweight="bold",
+            sublabel="api.openai.com")
 
 # ═══════════════════════════════════════════════════════════════
 # Arrows
 # ═══════════════════════════════════════════════════════════════
 
 # Browser → OpenClaw
-arrow(1.8, 0.8, 3.5, 6.2,
+arrow(1.8, 0.0, 3.5, 7.0,
       "kubectl port-forward\nWebSocket / HTTP", "#7B1FA2")
 
-# OpenClaw → K8s Service (KServe)
-arrow(7.5, 6.75, 8.8, 6.75,
+# OpenClaw → K8s Service (KServe) — local model path
+arrow(9.0, 6.75, 9.8, 6.75,
       "POST /v1/chat/completions", "#1565C0")
 
 # K8s Service → vLLM Pod
-arrow(10.0, 6.1, 5.25, 4.0,
+arrow(10.8, 6.1, 5.25, 4.0,
       "in-cluster DNS routing", "#EF6C00")
 
 # KServe Controller → InferenceService
-arrow(10.75, 8.6, 12.25, 8.0,
+arrow(10.75, 9.2, 12.75, 8.0,
       "reconciles", C_CLUSTER_B, connectionstyle="arc3,rad=-0.3")
 
-# cert-manager → KServe (TLS)
-arrow(5.0, 9.25, 5.5, 9.25, "", "#78909C")
+# cert-manager → Istio (TLS)
+arrow(5.0, 9.85, 5.5, 9.85, "", "#78909C")
+
+# OpenClaw → OpenAI API (internet path) — dashed style
+ax.annotate(
+    "", xy=(16.0, 0.0), xytext=(7.0, 5.5),
+    arrowprops=dict(
+        arrowstyle="->", color=C_OPENAI, lw=1.8,
+        connectionstyle="arc3,rad=0.2",
+        linestyle="dashed",
+    ),
+    zorder=4,
+)
+ax.text(12.5, 1.6, "OpenAI API mode\n(no KServe needed)", ha="center", va="center",
+        fontsize=7.5, color=C_OPENAI, zorder=5, fontweight="bold",
+        bbox=dict(boxstyle="round,pad=0.15", fc="#FFFFFF", ec="none", alpha=0.85))
 
 # ═══════════════════════════════════════════════════════════════
 # Deployment flow (right side annotation)

@@ -85,6 +85,8 @@
 
 ## Deployment Flow (deploy.sh)
 
+**Local models (llama/qwen):**
+
 ```
  ┌─────────────────────────────────────────────┐
  │  Step 1: Terraform                          │
@@ -117,10 +119,35 @@
  Total: ~15-25 minutes
 ```
 
-## Model Selection Options
+**OpenAI API mode (no KServe, no GPU):**
 
 ```
- deploy.sh
+ ┌─────────────────────────────────────────────┐
+ │  Step 1: Terraform                          │
+ │  terraform apply                            │
+ │  → GKE cluster + system pool               │
+ │                                (~8-12 min)  │
+ └──────────────────┬──────────────────────────┘
+                    │
+                    │  Steps 2-3: Skipped
+                    │  (KServe, Istio, cert-manager
+                    │   not needed for OpenAI API)
+                    ▼
+ ┌─────────────────────────────────────────────┐
+ │  Step 4: OpenClaw                           │
+ │  install-openclaw.sh                        │
+ │  → Helm install → Pod starts → Ready        │
+ │  → Calls OpenAI API directly               │
+ │                                (~1-2 min)   │
+ └─────────────────────────────────────────────┘
+
+ Total: ~10-15 minutes
+```
+
+## Model Selection & Skills
+
+```
+ deploy.sh [--model <model>] [--skills]
     │
     ├── --model llama (default)
     │   └── Llama 3.2 3B Instruct
@@ -134,11 +161,34 @@
     │       ├── Endpoint: qwen-3-5-2b-predictor.kserve.svc.cluster.local
     │       └── VRAM: ~4GB FP16
     │
-    └── --model openai
-        └── OpenAI API (gpt-4o-mini)
-            ├── Requires: OPENAI_API_KEY
-            ├── Endpoint: https://api.openai.com/v1
-            └── No GPU needed ($0 infrastructure)
+    ├── --model openai
+    │   └── OpenAI API (gpt-4o-mini)
+    │       ├── Requires: OPENAI_API_KEY
+    │       ├── Endpoint: https://api.openai.com/v1
+    │       └── No GPU needed ($0 infrastructure)
+    │
+    └── --skills (optional, composable with any model)
+        └── Adds init-skills init container
+            ├── Installs ClawHub skills declaratively
+            ├── Applies values-skills.yaml overlay
+            └── Skills persist on PVC across restarts
+```
+
+## Values File Composition
+
+```
+ install-openclaw.sh --values <file> [--values <file> ...]
+    │
+    │  Helm deep-merges multiple -f files left-to-right.
+    │  Model file provides the base config; overlays add features.
+    │
+    ├── Model files (pick one):
+    │   ├── values.yaml          → Llama 3.2 3B
+    │   ├── values-qwen.yaml     → Qwen 3.5 2B
+    │   └── values-openai.yaml   → OpenAI API
+    │
+    └── Overlays (optional, stack on top):
+        └── values-skills.yaml   → ClawHub skills (init-skills container)
 ```
 
 ## Cost Management (stop.sh / start.sh)

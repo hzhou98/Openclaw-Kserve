@@ -7,23 +7,30 @@
 #
 #   Step 1: Terraform → Provision GKE cluster with system + GPU node pools
 #   Step 2: KServe   → Install cert-manager, Istio, and KServe controller
-#   Step 3: Llama    → Deploy the Llama 3.2 3B model via KServe InferenceService
-#   Step 4: OpenClaw → Install OpenClaw pointing at the KServe model endpoint
+#                       (skipped for OpenAI mode — not needed)
+#   Step 3: Model    → Deploy the model via KServe InferenceService
+#                       (skipped for OpenAI mode — calls OpenAI API directly)
+#   Step 4: OpenClaw → Install OpenClaw pointing at the model endpoint
 #
 # The script is designed to be run once for initial setup. It's also safe to
 # re-run: Terraform is idempotent, Helm uses upgrade --install, and kubectl
 # apply is idempotent.
 #
-# Total deployment time: ~15-25 minutes
-#   - Terraform (GKE cluster creation): ~8-12 minutes
-#   - KServe stack installation: ~3-5 minutes
-#   - Model deployment + GPU scale-up: ~3-8 minutes (depends on spot availability)
-#   - OpenClaw installation: ~1-2 minutes
+# Total deployment time:
+#   Local models (llama/qwen): ~15-25 minutes
+#     - Terraform (GKE cluster creation): ~8-12 minutes
+#     - KServe stack installation: ~3-5 minutes
+#     - Model deployment + GPU scale-up: ~3-8 minutes
+#     - OpenClaw installation: ~1-2 minutes
+#   OpenAI mode: ~10-15 minutes
+#     - Terraform: ~8-12 minutes
+#     - OpenClaw installation: ~1-2 minutes
 #
 # Prerequisites:
 #   - gcloud authenticated (`gcloud auth login`)
 #   - terraform/terraform.tfvars exists with your project_id
-#   - HF_TOKEN env var set, OR kserve/hf-secret.yaml edited with your token
+#   - Local models: HF_TOKEN env var set, OR kserve/hf-secret.yaml edited
+#   - OpenAI mode: OPENAI_API_KEY env var set
 #
 # Shell options:
 #   set -e: Exit immediately if any command fails (non-zero exit code)
@@ -37,29 +44,36 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # =============================================================================
-# Model selection
+# Model selection & skills
 # =============================================================================
-# Supports three modes:
+# Supports three model modes:
 #   llama (default) — meta-llama/Llama-3.2-3B-Instruct (gated, needs license)
 #   qwen           — Qwen/Qwen3.5-2B (open, no license needed)
 #   openai         — OpenAI API (no GPU needed, requires OPENAI_API_KEY)
 #
+# The --skills flag enables ClawHub skill installation (values-skills.yaml).
+#
 # Usage:
-#   ./deploy.sh                 # Interactive prompt to choose model
-#   ./deploy.sh --model llama   # Deploy with Llama 3.2 3B
-#   ./deploy.sh --model qwen    # Deploy with Qwen 3.5 2B
-#   ./deploy.sh --model openai  # Deploy with OpenAI API (no GPU)
+#   ./deploy.sh                          # Interactive prompt to choose model
+#   ./deploy.sh --model llama            # Deploy with Llama 3.2 3B
+#   ./deploy.sh --model qwen --skills    # Deploy with Qwen 3.5 2B + skills
+#   ./deploy.sh --model openai --skills  # Deploy with OpenAI API + skills
 # =============================================================================
 MODEL=""
+ENABLE_SKILLS=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --model)
       MODEL="$2"
       shift 2
       ;;
+    --skills)
+      ENABLE_SKILLS=true
+      shift
+      ;;
     *)
       echo "Unknown option: $1"
-      echo "Usage: ./deploy.sh [--model llama|qwen|openai]"
+      echo "Usage: ./deploy.sh [--model llama|qwen|openai] [--skills]"
       exit 1
       ;;
   esac
@@ -88,19 +102,19 @@ case "$MODEL" in
   llama)
     ISVC_FILE="$ROOT_DIR/kserve/llama-inferenceservice.yaml"
     ISVC_NAME="llama-3-2b"
-    OPENCLAW_VALUES="$ROOT_DIR/openclaw/values.yaml"
+    OPENCLAW_VALUES=("$ROOT_DIR/openclaw/values.yaml")
     MODEL_DISPLAY="Llama 3.2 3B Instruct"
     ;;
   qwen)
     ISVC_FILE="$ROOT_DIR/kserve/qwen-inferenceservice.yaml"
     ISVC_NAME="qwen-3-5-2b"
-    OPENCLAW_VALUES="$ROOT_DIR/openclaw/values-qwen.yaml"
+    OPENCLAW_VALUES=("$ROOT_DIR/openclaw/values-qwen.yaml")
     MODEL_DISPLAY="Qwen 3.5 2B"
     ;;
   openai)
     ISVC_FILE=""
     ISVC_NAME=""
-    OPENCLAW_VALUES="$ROOT_DIR/openclaw/values-openai.yaml"
+    OPENCLAW_VALUES=("$ROOT_DIR/openclaw/values-openai.yaml")
     MODEL_DISPLAY="OpenAI API (gpt-4o-mini)"
     ;;
   *)
@@ -109,9 +123,17 @@ case "$MODEL" in
     ;;
 esac
 
+# Append skills overlay if --skills was specified
+if [ "$ENABLE_SKILLS" = true ]; then
+  OPENCLAW_VALUES+=("$ROOT_DIR/openclaw/values-skills.yaml")
+fi
+
 echo "============================================"
 echo "  OpenClaw + KServe Deployment"
 echo "  Model: $MODEL_DISPLAY"
+if [ "$ENABLE_SKILLS" = true ]; then
+echo "  Skills: enabled"
+fi
 echo "============================================"
 echo ""
 
@@ -207,14 +229,25 @@ KUBECONFIG_CMD=$(cd "$ROOT_DIR/terraform" && terraform output -raw get_credentia
 eval "$KUBECONFIG_CMD"
 
 # =============================================================================
-# Step 2: Install KServe (cert-manager + Istio + KServe controller)
+# Step 2: Install KServe (skipped for OpenAI mode)
 # =============================================================================
-# Delegates to kserve/install-kserve.sh which handles the three-component
-# installation. See that script for detailed comments on each component.
+# For local models (llama/qwen):
+#   Delegates to kserve/install-kserve.sh which installs cert-manager, Istio,
+#   and the KServe controller. See that script for detailed comments.
+#
+# For OpenAI mode:
+#   KServe is not needed — OpenClaw calls OpenAI's API directly over the
+#   internet. Skipping also avoids installing cert-manager and Istio, which
+#   saves ~500MB RAM on the system pool and ~3-5 min of deploy time.
 # =============================================================================
-echo ""
-echo "=== Step 2: Installing KServe ==="
-bash "$ROOT_DIR/kserve/install-kserve.sh"
+if [ "$MODEL" = "openai" ]; then
+  echo ""
+  echo "=== Step 2: Skipped (KServe not needed for OpenAI API) ==="
+else
+  echo ""
+  echo "=== Step 2: Installing KServe ==="
+  bash "$ROOT_DIR/kserve/install-kserve.sh"
+fi
 
 # =============================================================================
 # Step 3: Deploy the model (skipped for OpenAI mode)
@@ -266,7 +299,11 @@ fi
 # =============================================================================
 echo ""
 echo "=== Step 4: Installing OpenClaw ==="
-bash "$ROOT_DIR/openclaw/install-openclaw.sh" --values "$OPENCLAW_VALUES"
+OPENCLAW_INSTALL_ARGS=()
+for vf in "${OPENCLAW_VALUES[@]}"; do
+  OPENCLAW_INSTALL_ARGS+=(--values "$vf")
+done
+bash "$ROOT_DIR/openclaw/install-openclaw.sh" "${OPENCLAW_INSTALL_ARGS[@]}"
 
 GATEWAY_TOKEN=$(kubectl get secret openclaw-env-secret -n openclaw -o jsonpath='{.data.OPENCLAW_GATEWAY_TOKEN}' | base64 -d 2>/dev/null || echo "UNKNOWN")
 

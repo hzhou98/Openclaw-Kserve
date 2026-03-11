@@ -11,6 +11,9 @@
 #
 # For OpenAI API instead, use values-openai.yaml:
 #   bash openclaw/install-openclaw.sh --values values-openai.yaml
+#
+# To add skills, compose with values-skills.yaml:
+#   bash openclaw/install-openclaw.sh --values values-qwen.yaml --values values-skills.yaml
 # =============================================================================
 app-template:
   controllers:

@@ -1,0 +1,105 @@
+# =============================================================================
+# OpenClaw Helm Values — Skills Configuration
+# =============================================================================
+#
+# Composable overlay that adds ClawHub skill installation to any model config.
+# Apply alongside a model-specific values file:
+#
+#   bash openclaw/install-openclaw.sh --values values.yaml --values values-skills.yaml
+#   bash openclaw/install-openclaw.sh --values values-qwen.yaml --values values-skills.yaml
+#   bash openclaw/install-openclaw.sh --values values-openai.yaml --values values-skills.yaml
+#
+# Or with Helm directly:
+#   helm upgrade openclaw openclaw/openclaw -n openclaw \
+#     -f openclaw/values.yaml -f openclaw/values-skills.yaml
+#
+# Browse available skills at https://clawhub.com
+# To add more skills, append slugs to the "for skill in ..." line below.
+# =============================================================================
+app-template:
+  controllers:
+    main:
+      initContainers:
+        init-skills:
+          image:
+            repository: ghcr.io/openclaw/openclaw
+            tag: "{{ .Values.openclawVersion }}"
+          command:
+            - sh
+            - -c
+            - |
+              log() { echo "[$(date -Iseconds)] [init-skills] $*"; }
+
+              log "Starting skills initialization"
+
+              mkdir -p /home/node/.openclaw/workspace/skills
+              cd /home/node/.openclaw/workspace
+              install_skill() {
+                skill="$1"
+                SKILL_NAME="$(basename "$skill")"
+                if [ -z "$skill" ]; then
+                  return 0
+                fi
+                if [ -d "skills/$SKILL_NAME" ]; then
+                  log "Skill already installed: $skill"
+                  return 0
+                fi
+                log "Installing skill: $skill"
+                attempts=6
+                delay=5
+                for i in $(seq 1 "$attempts"); do
+                  if npx -y clawhub install "$skill" --no-input; then
+                    log "Installed skill: $skill"
+                    return 0
+                  fi
+                  jitter=$((RANDOM % 5))
+                  if [ "$i" -lt "$attempts" ]; then
+                    log "WARNING: Failed to install skill: $skill (attempt $i/$attempts). Retrying in $((delay + jitter))s..."
+                    sleep $((delay + jitter))
+                    delay=$((delay * 2))
+                  fi
+                done
+                log "WARNING: Failed to install skill after $attempts attempts: $skill"
+                return 1
+              }
+
+              # ── Add skill slugs here ──
+              for skill in weather; do
+                install_skill "$skill" || true
+              done
+
+              log "Skills initialization complete"
+          env:
+            HOME: /tmp
+            NPM_CONFIG_CACHE: /tmp/.npm
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+
+  persistence:
+    data:
+      advancedMounts:
+        main:
+          init-config:
+            - path: /home/node/.openclaw
+          init-skills:
+            - path: /home/node/.openclaw
+          main:
+            - path: /home/node/.openclaw
+    tmp:
+      enabled: true
+      type: emptyDir
+      advancedMounts:
+        main:
+          init-config:
+            - path: /tmp
+          init-skills:
+            - path: /tmp
+          main:
+            - path: /tmp
