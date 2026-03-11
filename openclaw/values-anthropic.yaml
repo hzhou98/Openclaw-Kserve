@@ -14,8 +14,8 @@
 #   bash openclaw/install-openclaw.sh \
 #     --values values-anthropic.yaml --values values-skills.yaml
 #
-# The default model is claude-sonnet-4-20250514. Change
-# agents.defaults.model.primary to use a different model.
+# The default model is claude-haiku-4-5-20251001 (cheapest). Use --api-model
+# to select a different model, or change agents.defaults.model.primary manually.
 # =============================================================================
 app-template:
   controllers:
@@ -52,12 +52,20 @@ app-template:
                   "apiKey": "${ANTHROPIC_API_KEY}",
                   "models": [
                     {
-                      "id": "claude-sonnet-4-20250514",
-                      "name": "Claude Sonnet 4",
+                      "id": "claude-opus-4-6",
+                      "name": "Claude Opus 4.6",
                       "reasoning": false,
                       "input": ["text", "image"],
                       "contextWindow": 200000,
-                      "maxTokens": 8192
+                      "maxTokens": 16384
+                    },
+                    {
+                      "id": "claude-sonnet-4-6",
+                      "name": "Claude Sonnet 4.6",
+                      "reasoning": false,
+                      "input": ["text", "image"],
+                      "contextWindow": 200000,
+                      "maxTokens": 16384
                     },
                     {
                       "id": "claude-haiku-4-5-20251001",
@@ -74,7 +82,7 @@ app-template:
             "agents": {
               "defaults": {
                 "model": {
-                  "primary": "anthropic/claude-sonnet-4-20250514"
+                  "primary": "anthropic/claude-haiku-4-5-20251001"
                 }
               }
             }
