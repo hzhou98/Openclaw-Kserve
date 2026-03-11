@@ -4,23 +4,7 @@ Deploy [OpenClaw](https://github.com/serhanekicii/openclaw) with a self-hosted L
 
 ## Architecture
 
-```
-Browser / Messaging App
-        │
-        ▼
-OpenClaw Pod (port 18789)                    ← Node.js app, ~512MB RAM
-        │  POST /v1/chat/completions
-        │  (OpenAI-compatible API)
-        ▼
-KServe InferenceService                      ← vLLM serving engine
-  Llama 3.2 3B Instruct                      ← ~6GB VRAM (FP16)
-  (L4 GPU, 24GB VRAM, spot instance)
-        │
-        ▼
-GKE Standard Cluster (us-central1-a, zonal)
-  ├─ System pool: e2-standard-2 spot (1-4 nodes) ← Runs everything except the model
-  └─ GPU pool: g2-standard-4 + L4 spot (0-1)  ← Scales to zero when idle
-```
+![System Architecture](docs/architecture.png)
 
 ### How the pieces connect
 
