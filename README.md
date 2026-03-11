@@ -97,6 +97,14 @@ OpenClaw supports **skills** from [ClawHub](https://clawhub.com) — installable
 bash openclaw/install-openclaw.sh --values values.yaml --values values-skills.yaml
 ```
 
+**Adding skills later** — no cluster restart needed, only the OpenClaw pod cycles (~30s):
+
+```bash
+# 1. Edit openclaw/values-skills.yaml to add new skill slugs
+# 2. Re-run the install script
+bash openclaw/install-openclaw.sh --values values.yaml --values values-skills.yaml
+```
+
 Edit `openclaw/values-skills.yaml` to add/remove skill slugs. See [docs/skills.md](docs/skills.md) for details.
 
 ## Cost Management
