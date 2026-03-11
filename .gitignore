@@ -6,6 +6,7 @@ terraform/terraform.tfvars
 terraform/.terraform.tfstate.lock.info
 *.bak
 kserve/.hf_secret
+kserve/hf_secret.key
 kserve/.hf_token
 kserve/hf-secret.yaml
 openclaw/open-ai.key

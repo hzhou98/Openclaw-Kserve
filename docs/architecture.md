@@ -119,7 +119,7 @@
  Total: ~15-25 minutes
 ```
 
-**OpenAI API mode (no KServe, no GPU):**
+**Cloud API mode — OpenAI / Anthropic (no KServe, no GPU):**
 
 ```
  ┌─────────────────────────────────────────────┐
@@ -131,13 +131,13 @@
                     │
                     │  Steps 2-3: Skipped
                     │  (KServe, Istio, cert-manager
-                    │   not needed for OpenAI API)
+                    │   not needed for cloud APIs)
                     ▼
  ┌─────────────────────────────────────────────┐
  │  Step 4: OpenClaw                           │
  │  install-openclaw.sh                        │
  │  → Helm install → Pod starts → Ready        │
- │  → Calls OpenAI API directly               │
+ │  → Calls cloud API directly                │
  │                                (~1-2 min)   │
  └─────────────────────────────────────────────┘
 
@@ -167,6 +167,12 @@
     │       ├── Endpoint: https://api.openai.com/v1
     │       └── No GPU needed ($0 infrastructure)
     │
+    ├── --model anthropic
+    │   └── Anthropic API (Claude Sonnet 4)
+    │       ├── Requires: ANTHROPIC_API_KEY
+    │       ├── Endpoint: https://api.anthropic.com/v1
+    │       └── No GPU needed ($0 infrastructure)
+    │
     └── --skills (optional, composable with any model)
         └── Adds init-skills init container
             ├── Installs ClawHub skills declaratively
@@ -183,9 +189,10 @@
     │  Model file provides the base config; overlays add features.
     │
     ├── Model files (pick one):
-    │   ├── values.yaml          → Llama 3.2 3B
-    │   ├── values-qwen.yaml     → Qwen 3.5 2B
-    │   └── values-openai.yaml   → OpenAI API
+    │   ├── values.yaml            → Llama 3.2 3B
+    │   ├── values-qwen.yaml       → Qwen 3.5 2B
+    │   ├── values-openai.yaml     → OpenAI API
+    │   └── values-anthropic.yaml  → Anthropic API
     │
     └── Overlays (optional, stack on top):
         └── values-skills.yaml   → ClawHub skills (init-skills container)

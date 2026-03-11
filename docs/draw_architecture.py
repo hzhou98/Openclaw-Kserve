@@ -9,7 +9,7 @@ from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
 
 fig, ax = plt.subplots(1, 1, figsize=(18, 14))
 ax.set_xlim(0, 18)
-ax.set_ylim(-1.0, 13.5)
+ax.set_ylim(-1.8, 13.5)
 ax.axis("off")
 fig.patch.set_facecolor("#FAFBFC")
 
@@ -29,6 +29,7 @@ C_BROWSER  = "#EDE7F6"  # light purple
 C_ARROW    = "#455A64"  # dark grey
 C_TITLE    = "#1A237E"  # dark blue
 C_OPENAI   = "#10A37F"  # OpenAI green
+C_ANTHROPIC= "#D97706"  # Anthropic amber/orange
 
 
 def rounded_box(x, y, w, h, label, facecolor, edgecolor, lw=1.5,
@@ -134,7 +135,7 @@ rounded_box(7.0, 7.0, 1.8, 1.1, "init-skills", C_COMP, "#1976D2",
 # ── OpenClaw routing: two paths ──
 # Path label inside OpenClaw box
 rounded_box(2.3, 5.7, 6.4, 1.0, "", "#E3F2FD", "#1976D2", lw=0.8, alpha=0.3)
-ax.text(5.5, 6.2, "LLM routing: KServe in-cluster  OR  OpenAI API (internet)",
+ax.text(5.5, 6.2, "LLM routing: KServe in-cluster  OR  Cloud API (internet)",
         ha="center", va="center", fontsize=7.5, color="#1565C0", zorder=5,
         style="italic")
 
@@ -170,33 +171,38 @@ rounded_box(9.0, 2.1, 7.0, 1.9, "", "#E8EAF6", "#3949AB", lw=1, alpha=0.5)
 ax.text(12.5, 3.75, "Model Options  (--model flag)", fontsize=10,
         fontweight="bold", color="#1A237E", ha="center", zorder=5)
 
-rounded_box(9.3, 2.3, 2.0, 1.1, "Llama 3.2 3B", C_COMP, "#3949AB",
-            sublabel="~6GB FP16\nGated (HF token)", fontsize=8.5)
-rounded_box(11.5, 2.3, 2.0, 1.1, "Qwen 3.5 2B", C_COMP, "#3949AB",
-            sublabel="~4GB FP16\nOpen model", fontsize=8.5)
-rounded_box(13.7, 2.3, 2.0, 1.1, "OpenAI API", C_COMP, C_OPENAI,
-            sublabel="gpt-4o-mini\nNo GPU/KServe", fontsize=8.5)
+rounded_box(9.3, 2.3, 1.5, 1.1, "Llama 3.2 3B", C_COMP, "#3949AB",
+            sublabel="~6GB FP16\nGated (HF)", fontsize=8)
+rounded_box(11.0, 2.3, 1.5, 1.1, "Qwen 3.5 2B", C_COMP, "#3949AB",
+            sublabel="~4GB FP16\nOpen model", fontsize=8)
+rounded_box(12.7, 2.3, 1.5, 1.1, "OpenAI API", C_COMP, C_OPENAI,
+            sublabel="gpt-4o-mini\nNo GPU", fontsize=8)
+rounded_box(14.4, 2.3, 1.5, 1.1, "Anthropic", C_COMP, C_ANTHROPIC,
+            sublabel="Claude\nNo GPU", fontsize=8)
 
 # ═══════════════════════════════════════════════════════════════
 # Browser (outside cluster)
 # ═══════════════════════════════════════════════════════════════
-rounded_box(0.3, -0.8, 3.0, 0.8, "Browser", C_BROWSER, "#7B1FA2",
+rounded_box(0.3, -1.5, 3.0, 1.2, "Browser", C_BROWSER, "#7B1FA2",
             fontsize=11, fontweight="bold",
             sublabel="localhost:18789")
 
 # ═══════════════════════════════════════════════════════════════
-# OpenAI API (outside cluster)
+# Cloud APIs (outside cluster)
 # ═══════════════════════════════════════════════════════════════
-rounded_box(14.5, -0.8, 3.0, 0.8, "OpenAI API", "#E8F5E9", C_OPENAI,
-            fontsize=11, fontweight="bold",
+rounded_box(10.5, -1.5, 3.0, 1.2, "OpenAI API", "#E8F5E9", C_OPENAI,
+            fontsize=10, fontweight="bold",
             sublabel="api.openai.com")
+rounded_box(14.5, -1.5, 3.0, 1.2, "Anthropic API", "#FEF3C7", C_ANTHROPIC,
+            fontsize=10, fontweight="bold",
+            sublabel="api.anthropic.com")
 
 # ═══════════════════════════════════════════════════════════════
 # Arrows
 # ═══════════════════════════════════════════════════════════════
 
 # Browser → OpenClaw
-arrow(1.8, 0.0, 3.5, 7.0,
+arrow(1.8, -0.3, 3.5, 7.0,
       "kubectl port-forward\nWebSocket / HTTP", "#7B1FA2")
 
 # OpenClaw → K8s Service (KServe) — local model path
@@ -216,16 +222,27 @@ arrow(5.0, 9.85, 5.5, 9.85, "", "#78909C")
 
 # OpenClaw → OpenAI API (internet path) — dashed style
 ax.annotate(
-    "", xy=(16.0, 0.0), xytext=(7.0, 5.5),
+    "", xy=(12.0, -0.3), xytext=(6.5, 5.5),
     arrowprops=dict(
         arrowstyle="->", color=C_OPENAI, lw=1.8,
+        connectionstyle="arc3,rad=0.15",
+        linestyle="dashed",
+    ),
+    zorder=4,
+)
+
+# OpenClaw → Anthropic API (internet path) — dashed style
+ax.annotate(
+    "", xy=(16.0, -0.3), xytext=(7.5, 5.5),
+    arrowprops=dict(
+        arrowstyle="->", color=C_ANTHROPIC, lw=1.8,
         connectionstyle="arc3,rad=0.2",
         linestyle="dashed",
     ),
     zorder=4,
 )
-ax.text(12.5, 1.6, "OpenAI API mode\n(no KServe needed)", ha="center", va="center",
-        fontsize=7.5, color=C_OPENAI, zorder=5, fontweight="bold",
+ax.text(12.5, 1.5, "Cloud API mode\n(no KServe needed)", ha="center", va="center",
+        fontsize=7.5, color="#455A64", zorder=5, fontweight="bold",
         bbox=dict(boxstyle="round,pad=0.15", fc="#FFFFFF", ec="none", alpha=0.85))
 
 # ═══════════════════════════════════════════════════════════════
