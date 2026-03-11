@@ -45,11 +45,12 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #   openai         — OpenAI API (no GPU needed, requires OPENAI_API_KEY)
 #
 # Usage:
-#   ./deploy.sh                 # Deploy with Llama 3.2 3B (default)
+#   ./deploy.sh                 # Interactive prompt to choose model
+#   ./deploy.sh --model llama   # Deploy with Llama 3.2 3B
 #   ./deploy.sh --model qwen    # Deploy with Qwen 3.5 2B
 #   ./deploy.sh --model openai  # Deploy with OpenAI API (no GPU)
 # =============================================================================
-MODEL="llama"
+MODEL=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --model)
@@ -63,6 +64,25 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# If no --model flag was provided, prompt the user to choose interactively.
+if [ -z "$MODEL" ]; then
+  echo "Select a model backend:"
+  echo "  1) llama  — Llama 3.2 3B Instruct (requires HF token + GPU)"
+  echo "  2) qwen   — Qwen 3.5 2B (requires HF token + GPU)"
+  echo "  3) openai — OpenAI API (no GPU needed, requires OPENAI_API_KEY)"
+  echo ""
+  read -rp "Enter choice [1/2/3] (default: 1): " choice
+  case "${choice:-1}" in
+    1) MODEL="llama" ;;
+    2) MODEL="qwen" ;;
+    3) MODEL="openai" ;;
+    *)
+      echo "ERROR: Invalid choice '$choice'."
+      exit 1
+      ;;
+  esac
+fi
 
 case "$MODEL" in
   llama)

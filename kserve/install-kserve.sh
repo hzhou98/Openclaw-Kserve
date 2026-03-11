@@ -195,12 +195,11 @@ KSERVE_WEBHOOKS=(
   servingruntime.serving.kserve.io
   trainedmodel.serving.kserve.io
   modelmesh-servingruntime.serving.kserve.io
+  servingruntime.modelmesh-webhook-server.default
 )
 for webhook in "${KSERVE_WEBHOOKS[@]}"; do
-  if kubectl get validatingwebhookconfiguration "$webhook" &>/dev/null; then
-    echo "  Deleting $webhook webhook..."
-    kubectl delete validatingwebhookconfiguration "$webhook"
-  fi
+  kubectl delete validatingwebhookconfiguration "$webhook" --ignore-not-found
+  kubectl delete mutatingwebhookconfiguration "$webhook" --ignore-not-found
 done
 
 # Create the Istio IngressClass resource. KServe's RawDeployment mode creates
@@ -228,18 +227,72 @@ helm upgrade --install kserve-crd oci://ghcr.io/kserve/charts/kserve-crd \
 #   2. KServe webhooks point at kserve-webhook-server-service which has no
 #      endpoints yet (the controller pod comes from the kserve chart below).
 # Delete both validating AND mutating webhook configs unconditionally.
+# Also do a broad sweep for any modelmesh webhooks not in the named list.
+# Delete ALL KServe/ModelMesh webhooks before kserve install.
 echo "  Deleting KServe webhooks before kserve install..."
 for webhook in "${KSERVE_WEBHOOKS[@]}"; do
   kubectl delete validatingwebhookconfiguration "$webhook" --ignore-not-found
   kubectl delete mutatingwebhookconfiguration "$webhook" --ignore-not-found
 done
+# Sweep for any webhook referencing modelmesh or kserve-webhook-server.
+for kind in mutatingwebhookconfigurations validatingwebhookconfigurations; do
+  for wh in $(kubectl get "$kind" -o name 2>/dev/null); do
+    if kubectl get "$wh" -o yaml 2>/dev/null | grep -qE "modelmesh|kserve-webhook-server"; then
+      echo "  Deleting $wh..."
+      kubectl delete "$wh" --ignore-not-found
+    fi
+  done
+done
 
-helm upgrade --install kserve oci://ghcr.io/kserve/charts/kserve \
-  --namespace kserve \
-  --version v0.14.1 \
-  --set kserve.controller.deploymentMode=RawDeployment \
-  --set kserve.controller.gateway.ingressGateway.className=istio \
-  --wait
+# Two-phase KServe install to solve the chicken-and-egg webhook problem:
+#
+# The kserve chart creates webhook configs, the controller Deployment, AND
+# ClusterServingRuntime resources in one install. The webhooks intercept
+# ClusterServingRuntime creation, but the webhook server (controller pod)
+# isn't running yet → "no endpoints available" error.
+#
+# Phase 1: Let helm install fail (it creates the Deployment + Service, but
+#          fails on ClusterServingRuntime). Then delete the webhooks and
+#          wait for the controller pod to start.
+# Phase 2: Re-run helm upgrade. The controller is now running, webhooks
+#          are recreated with working endpoints, and all resources succeed.
+
+KSERVE_HELM_ARGS=(
+  --namespace kserve
+  --version v0.14.1
+  --set kserve.controller.deploymentMode=RawDeployment
+  --set kserve.controller.gateway.ingressGateway.className=istio
+  --set kserve.modelmesh.enabled=false
+)
+
+echo "  Phase 1: Installing kserve (controller Deployment)..."
+if ! helm upgrade --install kserve oci://ghcr.io/kserve/charts/kserve \
+    "${KSERVE_HELM_ARGS[@]}" --wait --timeout 60s 2>/dev/null; then
+
+  echo "  Phase 1 partially installed (expected — webhook has no endpoints yet)."
+  echo "  Cleaning up webhooks and waiting for controller pod..."
+
+  # Delete all kserve/modelmesh webhooks so the controller pod can start
+  # without anything blocking resource creation.
+  for kind in mutatingwebhookconfigurations validatingwebhookconfigurations; do
+    for wh in $(kubectl get "$kind" -o name 2>/dev/null); do
+      if kubectl get "$wh" -o yaml 2>/dev/null | grep -qE "modelmesh|kserve-webhook-server"; then
+        kubectl delete "$wh" --ignore-not-found
+      fi
+    done
+  done
+
+  # Wait for the controller pod to become ready (it provides webhook endpoints).
+  echo "  Waiting for kserve-controller-manager pod..."
+  kubectl wait --for=condition=Ready pod \
+    -l control-plane=kserve-controller-manager \
+    -n kserve --timeout=120s
+
+  # Phase 2: Re-run helm — controller is running, webhooks will work.
+  echo "  Phase 2: Completing kserve install..."
+  helm upgrade --install kserve oci://ghcr.io/kserve/charts/kserve \
+    "${KSERVE_HELM_ARGS[@]}" --wait
+fi
 
 echo "=== KServe installation complete ==="
 echo ""
