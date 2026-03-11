@@ -1,0 +1,87 @@
+# =============================================================================
+# OpenClaw Helm Values — Anthropic API only (no local GPU model)
+# =============================================================================
+#
+# Use this to connect OpenClaw directly to Anthropic's Claude API.
+# No KServe, no vLLM, no GPU required.
+#
+# Prerequisites:
+#   - Set ANTHROPIC_API_KEY before running install-openclaw.sh:
+#       export ANTHROPIC_API_KEY=sk-ant-...
+#       bash openclaw/install-openclaw.sh --values values-anthropic.yaml
+#
+# To add skills, compose with values-skills.yaml:
+#   bash openclaw/install-openclaw.sh \
+#     --values values-anthropic.yaml --values values-skills.yaml
+#
+# The default model is claude-sonnet-4-20250514. Change
+# agents.defaults.model.primary to use a different model.
+# =============================================================================
+app-template:
+  controllers:
+    main:
+      containers:
+        main:
+          envFrom:
+            - secretRef:
+                name: openclaw-env-secret
+
+  configMaps:
+    config:
+      enabled: true
+      data:
+        openclaw.json: |
+          {
+            "gateway": {
+              "port": 18789,
+              "mode": "local",
+              "auth": {
+                "mode": "token",
+                "token": "${OPENCLAW_GATEWAY_TOKEN}"
+              },
+              "controlUi": {
+                "dangerouslyAllowHostHeaderOriginFallback": true
+              }
+            },
+            "models": {
+              "mode": "merge",
+              "providers": {
+                "anthropic": {
+                  "baseUrl": "https://api.anthropic.com/v1",
+                  "api": "anthropic",
+                  "apiKey": "${ANTHROPIC_API_KEY}",
+                  "models": [
+                    {
+                      "id": "claude-sonnet-4-20250514",
+                      "name": "Claude Sonnet 4",
+                      "reasoning": false,
+                      "input": ["text", "image"],
+                      "contextWindow": 200000,
+                      "maxTokens": 8192
+                    },
+                    {
+                      "id": "claude-haiku-4-5-20251001",
+                      "name": "Claude Haiku 4.5",
+                      "reasoning": false,
+                      "input": ["text", "image"],
+                      "contextWindow": 200000,
+                      "maxTokens": 8192
+                    }
+                  ]
+                }
+              }
+            },
+            "agents": {
+              "defaults": {
+                "model": {
+                  "primary": "anthropic/claude-sonnet-4-20250514"
+                }
+              }
+            }
+          }
+
+  persistence:
+    data:
+      enabled: true
+      size: 5Gi
+      accessMode: ReadWriteOnce

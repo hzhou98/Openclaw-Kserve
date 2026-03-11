@@ -90,10 +90,14 @@ SECRET_ARGS=(
   --namespace "$NAMESPACE"
   --from-literal=OPENCLAW_GATEWAY_TOKEN="$GATEWAY_TOKEN"
 )
-# Include OpenAI API key if provided (optional — enables OpenAI models in the UI)
+# Include API keys if provided (optional — enables cloud models in the UI)
 if [ -n "${OPENAI_API_KEY:-}" ]; then
   SECRET_ARGS+=(--from-literal=OPENAI_API_KEY="$OPENAI_API_KEY")
   echo "  Including OPENAI_API_KEY in secret"
+fi
+if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+  SECRET_ARGS+=(--from-literal=ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY")
+  echo "  Including ANTHROPIC_API_KEY in secret"
 fi
 kubectl create secret generic openclaw-env-secret \
   "${SECRET_ARGS[@]}" \

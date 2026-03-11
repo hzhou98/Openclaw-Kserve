@@ -1,12 +1,12 @@
 # OpenClaw + KServe on GKE
 
-Deploy [OpenClaw](https://github.com/serhanekicii/openclaw) with a self-hosted Llama 3.2 3B model served via KServe + vLLM on a cost-optimized GKE cluster.
+Deploy [OpenClaw](https://github.com/serhanekicii/openclaw) with self-hosted LLMs (Llama, Qwen) served via KServe + vLLM on a cost-optimized GKE cluster, or connect directly to cloud APIs (OpenAI, Anthropic, etc.).
 
 ## Architecture
 
 ![System Architecture](docs/architecture.png)
 
-1. **OpenClaw** sends chat completion requests to the KServe in-cluster endpoint (or OpenAI API directly).
+1. **OpenClaw** sends chat completion requests to the KServe in-cluster endpoint (or cloud APIs directly).
 2. **KServe + vLLM** serves the model on an L4 GPU via an OpenAI-compatible API.
 3. **GKE autoscaler** scales the GPU node pool to zero when idle ($0 GPU cost).
 
@@ -34,9 +34,12 @@ chmod +x deploy.sh kserve/install-kserve.sh openclaw/install-openclaw.sh
 # ./deploy.sh --model qwen            # Qwen 3.5 2B
 # ./deploy.sh --model llama --skills  # Llama + ClawHub skills
 
-# OR: Use OpenAI API (no GPU, no KServe — ~10 min)
+# OR: Use cloud APIs (no GPU, no KServe — ~10 min)
 export OPENAI_API_KEY=sk-...
 ./deploy.sh --model openai
+
+export ANTHROPIC_API_KEY=sk-ant-...
+./deploy.sh --model anthropic
 
 # 3. Access OpenClaw
 kubectl port-forward -n openclaw svc/openclaw 18789:18789
@@ -50,9 +53,10 @@ kubectl port-forward -n openclaw svc/openclaw 18789:18789
 | Llama 3.2 3B Instruct | `--model llama` (default) | L4 (6GB VRAM) | ~25 min |
 | Qwen 3.5 2B | `--model qwen` | L4 (4GB VRAM) | ~25 min |
 | OpenAI API (gpt-4o-mini) | `--model openai` | None | ~10 min |
+| Anthropic API (Claude Sonnet 4) | `--model anthropic` | None | ~10 min |
 | Custom model | See [docs/custom-models.md](docs/custom-models.md) | Varies | ~25 min |
 
-OpenAI mode skips KServe, Istio, and cert-manager entirely — OpenClaw calls the API directly.
+Cloud API modes skip KServe, Istio, and cert-manager entirely — OpenClaw calls the API directly.
 
 ## Project Structure
 
@@ -73,6 +77,7 @@ OpenAI mode skips KServe, Istio, and cert-manager entirely — OpenClaw calls th
 │   ├── values.yaml              # Llama config
 │   ├── values-qwen.yaml         # Qwen config
 │   ├── values-openai.yaml       # OpenAI config
+│   ├── values-anthropic.yaml    # Anthropic config
 │   ├── values-skills.yaml       # Skills overlay (composable)
 │   └── example-values.yaml      # Template for custom models
 ├── helm-chart/                  # Single Helm chart (alternative)

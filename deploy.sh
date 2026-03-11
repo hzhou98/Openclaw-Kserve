@@ -82,15 +82,17 @@ done
 # If no --model flag was provided, prompt the user to choose interactively.
 if [ -z "$MODEL" ]; then
   echo "Select a model backend:"
-  echo "  1) llama  — Llama 3.2 3B Instruct (requires HF token + GPU)"
-  echo "  2) qwen   — Qwen 3.5 2B (requires HF token + GPU)"
-  echo "  3) openai — OpenAI API (no GPU needed, requires OPENAI_API_KEY)"
+  echo "  1) llama     — Llama 3.2 3B Instruct (requires HF token + GPU)"
+  echo "  2) qwen      — Qwen 3.5 2B (requires HF token + GPU)"
+  echo "  3) openai    — OpenAI API (no GPU needed, requires OPENAI_API_KEY)"
+  echo "  4) anthropic — Anthropic API (no GPU needed, requires ANTHROPIC_API_KEY)"
   echo ""
-  read -rp "Enter choice [1/2/3] (default: 1): " choice
+  read -rp "Enter choice [1/2/3/4] (default: 1): " choice
   case "${choice:-1}" in
     1) MODEL="llama" ;;
     2) MODEL="qwen" ;;
     3) MODEL="openai" ;;
+    4) MODEL="anthropic" ;;
     *)
       echo "ERROR: Invalid choice '$choice'."
       exit 1
@@ -117,8 +119,14 @@ case "$MODEL" in
     OPENCLAW_VALUES=("$ROOT_DIR/openclaw/values-openai.yaml")
     MODEL_DISPLAY="OpenAI API (gpt-4o-mini)"
     ;;
+  anthropic)
+    ISVC_FILE=""
+    ISVC_NAME=""
+    OPENCLAW_VALUES=("$ROOT_DIR/openclaw/values-anthropic.yaml")
+    MODEL_DISPLAY="Anthropic API (Claude Sonnet 4)"
+    ;;
   *)
-    echo "ERROR: Unknown model '$MODEL'. Use 'llama', 'qwen', or 'openai'."
+    echo "ERROR: Unknown model '$MODEL'. Use 'llama', 'qwen', 'openai', or 'anthropic'."
     exit 1
     ;;
 esac
@@ -164,7 +172,7 @@ fi
 # Token handling
 # =============================================================================
 # For local models (llama/qwen): HF token is required for model downloads.
-# For OpenAI mode: OPENAI_API_KEY is required instead.
+# For cloud APIs: OPENAI_API_KEY or ANTHROPIC_API_KEY is required instead.
 # =============================================================================
 if [ "$MODEL" = "openai" ]; then
   if [ -z "${OPENAI_API_KEY:-}" ]; then
@@ -173,6 +181,13 @@ if [ "$MODEL" = "openai" ]; then
     exit 1
   fi
   echo "Using OpenAI API key from environment"
+elif [ "$MODEL" = "anthropic" ]; then
+  if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+    echo "ERROR: Set your Anthropic API key."
+    echo "  export ANTHROPIC_API_KEY=sk-ant-..."
+    exit 1
+  fi
+  echo "Using Anthropic API key from environment"
 else
   # HF token can be provided two ways:
   #   1. Edit kserve/hf-secret.yaml directly (replace YOUR_HF_TOKEN)
@@ -235,14 +250,14 @@ eval "$KUBECONFIG_CMD"
 #   Delegates to kserve/install-kserve.sh which installs cert-manager, Istio,
 #   and the KServe controller. See that script for detailed comments.
 #
-# For OpenAI mode:
-#   KServe is not needed — OpenClaw calls OpenAI's API directly over the
+# For cloud API modes (openai/anthropic):
+#   KServe is not needed — OpenClaw calls the API directly over the
 #   internet. Skipping also avoids installing cert-manager and Istio, which
 #   saves ~500MB RAM on the system pool and ~3-5 min of deploy time.
 # =============================================================================
-if [ "$MODEL" = "openai" ]; then
+if [ "$MODEL" = "openai" ] || [ "$MODEL" = "anthropic" ]; then
   echo ""
-  echo "=== Step 2: Skipped (KServe not needed for OpenAI API) ==="
+  echo "=== Step 2: Skipped (KServe not needed for cloud API) ==="
 else
   echo ""
   echo "=== Step 2: Installing KServe ==="
@@ -266,11 +281,11 @@ fi
 #     g. vLLM loads the model into GPU VRAM and starts serving
 #     h. KServe marks the InferenceService as Ready
 #
-# For OpenAI mode: No model to deploy — OpenClaw calls OpenAI's API directly.
+# For cloud API modes: No model to deploy — OpenClaw calls the API directly.
 # =============================================================================
-if [ "$MODEL" = "openai" ]; then
+if [ "$MODEL" = "openai" ] || [ "$MODEL" = "anthropic" ]; then
   echo ""
-  echo "=== Step 3: Skipped (using OpenAI API) ==="
+  echo "=== Step 3: Skipped (using cloud API) ==="
 else
   echo ""
   echo "=== Step 3: Deploying $MODEL_DISPLAY ==="
@@ -314,7 +329,7 @@ echo "  Model: $MODEL_DISPLAY"
 echo "============================================"
 echo ""
 echo "Verify:"
-if [ "$MODEL" != "openai" ]; then
+if [ "$MODEL" != "openai" ] && [ "$MODEL" != "anthropic" ]; then
   echo "  kubectl get pods -n kserve"
   echo "  kubectl get inferenceservice -n kserve"
 fi
