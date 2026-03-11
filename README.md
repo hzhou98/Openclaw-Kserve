@@ -137,3 +137,8 @@ See [docs/troubleshooting.md](docs/troubleshooting.md) for full FAQ.
 | [Operations](docs/operations.md) | Cost management, stop/start, teardown |
 | [Custom Models](docs/custom-models.md) | Add your own HuggingFace model |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and FAQ |
+| [OpenClaw Helm Chart](https://github.com/serhanekicii/openclaw-helm) | Upstream OpenClaw Helm chart |
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
