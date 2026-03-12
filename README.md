@@ -143,6 +143,23 @@ See [docs/operations.md](docs/operations.md) for teardown options and daily work
 | GPU node not provisioning | Check L4 quota: `kubectl describe pod -n kserve <pod>` |
 | Model download failing | Verify HF token and license acceptance |
 | OpenClaw can't reach model | Check service URL matches InferenceService name |
+| "unauthorized: too many failed authentication attempts" | Token changed on redeploy — see below |
+
+**Token changed after redeployment?** `install-openclaw.sh` generates a new gateway token each time unless you set `OPENCLAW_GATEWAY_TOKEN`. The browser still has the old token, and repeated attempts trigger a lockout.
+
+```bash
+# Get the new token
+kubectl get secret openclaw-env-secret -n openclaw -o jsonpath='{.data.OPENCLAW_GATEWAY_TOKEN}' | base64 -d
+
+# Open with new token: http://localhost:18789/?token=<NEW_TOKEN>
+
+# To prevent this, set a fixed token before redeploying:
+export OPENCLAW_GATEWAY_TOKEN=<your-fixed-token>
+bash openclaw/install-openclaw.sh --values values-openai.yaml --values values-skills.yaml
+
+# If lockout persists, restart the pod to reset the rate limiter:
+kubectl rollout restart deployment/openclaw -n openclaw
+```
 
 See [docs/troubleshooting.md](docs/troubleshooting.md) for full FAQ.
 
