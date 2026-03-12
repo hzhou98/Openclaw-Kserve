@@ -88,6 +88,33 @@ The browser remembers the token after the first successful access.
 kubectl get secret openclaw-env-secret -n openclaw -o jsonpath='{.data.OPENCLAW_GATEWAY_TOKEN}' | base64 -d
 ```
 
+### "unauthorized: too many failed authentication attempts" after redeployment
+
+This happens because `install-openclaw.sh` generates a **new gateway token** each time it runs (unless you set the `OPENCLAW_GATEWAY_TOKEN` env var). The browser still has the old token cached, and repeated attempts trigger a rate-limit lockout.
+
+**Fix:**
+
+```bash
+# 1. Get the new token
+kubectl get secret openclaw-env-secret -n openclaw -o jsonpath='{.data.OPENCLAW_GATEWAY_TOKEN}' | base64 -d
+
+# 2. Open the URL with the new token
+#    http://localhost:18789/?token=<NEW_TOKEN>
+```
+
+**Prevent it on future redeployments** by setting a fixed token:
+
+```bash
+export OPENCLAW_GATEWAY_TOKEN=<your-fixed-token>
+bash openclaw/install-openclaw.sh --values values-openai.yaml --values values-skills.yaml
+```
+
+**If the lockout persists**, restart the pod to reset the rate limiter:
+
+```bash
+kubectl rollout restart deployment/openclaw -n openclaw
+```
+
 ---
 
 [Back to main README](../README.md)

@@ -81,5 +81,5 @@ app-template:
   persistence:
     data:
       enabled: true
-      size: 5Gi
+      size: 20Gi
       accessMode: ReadWriteOnce

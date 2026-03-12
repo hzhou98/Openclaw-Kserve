@@ -36,10 +36,11 @@ chmod +x deploy.sh kserve/install-kserve.sh openclaw/install-openclaw.sh
 
 # OR: Use cloud APIs (no GPU, no KServe — ~10 min)
 export OPENAI_API_KEY=sk-...
-./deploy.sh --model openai
+./deploy.sh --model openai                       # Interactive model selection
+./deploy.sh --model openai --api-model gpt-4.1   # Specific model
 
 export ANTHROPIC_API_KEY=sk-ant-...
-./deploy.sh --model anthropic
+./deploy.sh --model anthropic --api-model claude-opus-4-6
 
 # 3. Access OpenClaw
 kubectl port-forward -n openclaw svc/openclaw 18789:18789
@@ -53,10 +54,19 @@ kubectl port-forward -n openclaw svc/openclaw 18789:18789
 | Llama 3.2 3B Instruct | `--model llama` (default) | L4 (6GB VRAM) | ~25 min |
 | Qwen 3.5 2B | `--model qwen` | L4 (4GB VRAM) | ~25 min |
 | OpenAI API (gpt-4o-mini) | `--model openai` | None | ~10 min |
-| Anthropic API (Claude Sonnet 4) | `--model anthropic` | None | ~10 min |
+| Anthropic API (Claude Haiku 4.5) | `--model anthropic` | None | ~10 min |
 | Custom model | See [docs/custom-models.md](docs/custom-models.md) | Varies | ~25 min |
 
 Cloud API modes skip KServe, Istio, and cert-manager entirely — OpenClaw calls the API directly.
+
+Use `--api-model` to select a specific model, or omit it for an interactive prompt:
+
+| Provider | Available models (`--api-model`) | Default |
+|----------|--------------------------------|---------|
+| OpenAI | `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano`, `gpt-4o`, `gpt-4o-mini`, `o3`, `o3-mini`, `o4-mini` | `gpt-4o-mini` |
+| Anthropic | `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5-20251001` | `claude-haiku-4-5-20251001` |
+
+Models not in the list are automatically validated against the live API, so newer models work without updating the script.
 
 ## Project Structure
 
@@ -97,6 +107,14 @@ OpenClaw supports **skills** from [ClawHub](https://clawhub.com) — installable
 bash openclaw/install-openclaw.sh --values values.yaml --values values-skills.yaml
 ```
 
+**Adding skills later** — no cluster restart needed, only the OpenClaw pod cycles (~30s):
+
+```bash
+# 1. Edit openclaw/values-skills.yaml to add new skill slugs
+# 2. Re-run the install script
+bash openclaw/install-openclaw.sh --values values.yaml --values values-skills.yaml
+```
+
 Edit `openclaw/values-skills.yaml` to add/remove skill slugs. See [docs/skills.md](docs/skills.md) for details.
 
 ## Cost Management
@@ -125,6 +143,23 @@ See [docs/operations.md](docs/operations.md) for teardown options and daily work
 | GPU node not provisioning | Check L4 quota: `kubectl describe pod -n kserve <pod>` |
 | Model download failing | Verify HF token and license acceptance |
 | OpenClaw can't reach model | Check service URL matches InferenceService name |
+| "unauthorized: too many failed authentication attempts" | Token changed on redeploy — see below |
+
+**Token changed after redeployment?** `install-openclaw.sh` generates a new gateway token each time unless you set `OPENCLAW_GATEWAY_TOKEN`. The browser still has the old token, and repeated attempts trigger a lockout.
+
+```bash
+# Get the new token
+kubectl get secret openclaw-env-secret -n openclaw -o jsonpath='{.data.OPENCLAW_GATEWAY_TOKEN}' | base64 -d
+
+# Open with new token: http://localhost:18789/?token=<NEW_TOKEN>
+
+# To prevent this, set a fixed token before redeploying:
+export OPENCLAW_GATEWAY_TOKEN=<your-fixed-token>
+bash openclaw/install-openclaw.sh --values values-openai.yaml --values values-skills.yaml
+
+# If lockout persists, restart the pod to reset the rate limiter:
+kubectl rollout restart deployment/openclaw -n openclaw
+```
 
 See [docs/troubleshooting.md](docs/troubleshooting.md) for full FAQ.
 

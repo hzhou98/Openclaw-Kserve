@@ -46,25 +46,35 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # =============================================================================
 # Model selection & skills
 # =============================================================================
-# Supports three model modes:
+# Supports four model modes:
 #   llama (default) — meta-llama/Llama-3.2-3B-Instruct (gated, needs license)
 #   qwen           — Qwen/Qwen3.5-2B (open, no license needed)
 #   openai         — OpenAI API (no GPU needed, requires OPENAI_API_KEY)
+#   anthropic      — Anthropic API (no GPU needed, requires ANTHROPIC_API_KEY)
 #
+# The --api-model flag selects a specific model within a cloud API provider.
+# If omitted, an interactive prompt is shown (or defaults are used).
 # The --skills flag enables ClawHub skill installation (values-skills.yaml).
 #
 # Usage:
-#   ./deploy.sh                          # Interactive prompt to choose model
-#   ./deploy.sh --model llama            # Deploy with Llama 3.2 3B
-#   ./deploy.sh --model qwen --skills    # Deploy with Qwen 3.5 2B + skills
-#   ./deploy.sh --model openai --skills  # Deploy with OpenAI API + skills
+#   ./deploy.sh                                      # Interactive prompt
+#   ./deploy.sh --model llama                        # Llama 3.2 3B
+#   ./deploy.sh --model openai                       # OpenAI (interactive model choice)
+#   ./deploy.sh --model openai --api-model gpt-4.1   # OpenAI with GPT-4.1
+#   ./deploy.sh --model anthropic --api-model claude-opus-4-20250514
+#   ./deploy.sh --model openai --skills              # OpenAI + skills
 # =============================================================================
 MODEL=""
+API_MODEL=""
 ENABLE_SKILLS=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --model)
       MODEL="$2"
+      shift 2
+      ;;
+    --api-model)
+      API_MODEL="$2"
       shift 2
       ;;
     --skills)
@@ -73,11 +83,111 @@ while [[ $# -gt 0 ]]; do
       ;;
     *)
       echo "Unknown option: $1"
-      echo "Usage: ./deploy.sh [--model llama|qwen|openai] [--skills]"
+      echo "Usage: ./deploy.sh [--model llama|qwen|openai|anthropic] [--api-model <model-id>] [--skills]"
       exit 1
       ;;
   esac
 done
+
+# =============================================================================
+# Supported cloud API models (validated list)
+# =============================================================================
+# These lists define which model IDs are accepted by --api-model.
+# Update these when new models are released.
+# =============================================================================
+OPENAI_MODELS=(
+  "gpt-4o"
+  "gpt-4o-mini"
+  "gpt-4.1"
+  "gpt-4.1-mini"
+  "gpt-4.1-nano"
+  "o3"
+  "o3-mini"
+  "o4-mini"
+)
+
+ANTHROPIC_MODELS=(
+  "claude-opus-4-6"
+  "claude-sonnet-4-6"
+  "claude-haiku-4-5-20251001"
+)
+
+# Validate --api-model against supported list, with live API fallback
+validate_api_model() {
+  local provider="$1"
+  local model="$2"
+  local valid_models=()
+
+  case "$provider" in
+    openai)    valid_models=("${OPENAI_MODELS[@]}") ;;
+    anthropic) valid_models=("${ANTHROPIC_MODELS[@]}") ;;
+    *)
+      echo "ERROR: --api-model is only supported with --model openai or --model anthropic."
+      exit 1
+      ;;
+  esac
+
+  # Check hardcoded list first (fast, works offline)
+  for m in "${valid_models[@]}"; do
+    if [ "$m" = "$model" ]; then
+      return 0
+    fi
+  done
+
+  # Not in hardcoded list — try validating against the live API
+  echo "Model '$model' not in known list, checking $provider API..."
+
+  if [ "$provider" = "openai" ]; then
+    if [ -z "${OPENAI_API_KEY:-}" ]; then
+      echo "ERROR: Cannot validate model — OPENAI_API_KEY not set."
+      echo ""
+      echo "Known OpenAI models:"
+      for m in "${valid_models[@]}"; do echo "  - $m"; done
+      exit 1
+    fi
+    # Query the OpenAI /v1/models endpoint and check if the model exists
+    local api_response
+    api_response=$(curl -s -w "\n%{http_code}" \
+      "https://api.openai.com/v1/models/$model" \
+      -H "Authorization: Bearer $OPENAI_API_KEY" 2>/dev/null)
+    local http_code
+    http_code=$(echo "$api_response" | tail -1)
+    if [ "$http_code" = "200" ]; then
+      echo "Model '$model' verified via OpenAI API"
+      return 0
+    fi
+  elif [ "$provider" = "anthropic" ]; then
+    if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+      echo "ERROR: Cannot validate model — ANTHROPIC_API_KEY not set."
+      echo ""
+      echo "Known Anthropic models:"
+      for m in "${valid_models[@]}"; do echo "  - $m"; done
+      exit 1
+    fi
+    # Query the Anthropic /v1/models endpoint and check if the model exists
+    local api_response
+    api_response=$(curl -s -w "\n%{http_code}" \
+      "https://api.anthropic.com/v1/models/$model" \
+      -H "anthropic-version: 2023-06-01" \
+      -H "X-Api-Key: $ANTHROPIC_API_KEY" 2>/dev/null)
+    local http_code
+    http_code=$(echo "$api_response" | tail -1)
+    if [ "$http_code" = "200" ]; then
+      echo "Model '$model' verified via Anthropic API"
+      return 0
+    fi
+  fi
+
+  echo "ERROR: Model '$model' not found for $provider."
+  echo ""
+  echo "Known $provider models:"
+  for m in "${valid_models[@]}"; do
+    echo "  - $m"
+  done
+  echo ""
+  echo "If this is a new model, check that your API key has access to it."
+  exit 1
+}
 
 # If no --model flag was provided, prompt the user to choose interactively.
 if [ -z "$MODEL" ]; then
@@ -100,6 +210,19 @@ if [ -z "$MODEL" ]; then
   esac
 fi
 
+# If using a cloud API and no --api-model was given, use defaults.
+# OpenAI: gpt-4o-mini (cheapest), Anthropic: claude-haiku-4-5-20251001 (cheapest)
+if [ "$MODEL" = "openai" ] && [ -z "$API_MODEL" ]; then
+  API_MODEL="gpt-4o-mini"
+elif [ "$MODEL" = "anthropic" ] && [ -z "$API_MODEL" ]; then
+  API_MODEL="claude-haiku-4-5-20251001"
+fi
+
+# Validate --api-model if provided via flag
+if [ -n "$API_MODEL" ]; then
+  validate_api_model "$MODEL" "$API_MODEL"
+fi
+
 case "$MODEL" in
   llama)
     ISVC_FILE="$ROOT_DIR/kserve/llama-inferenceservice.yaml"
@@ -116,14 +239,16 @@ case "$MODEL" in
   openai)
     ISVC_FILE=""
     ISVC_NAME=""
+    API_MODEL="${API_MODEL:-gpt-4o-mini}"
     OPENCLAW_VALUES=("$ROOT_DIR/openclaw/values-openai.yaml")
-    MODEL_DISPLAY="OpenAI API (gpt-4o-mini)"
+    MODEL_DISPLAY="OpenAI API ($API_MODEL)"
     ;;
   anthropic)
     ISVC_FILE=""
     ISVC_NAME=""
+    API_MODEL="${API_MODEL:-claude-haiku-4-5-20251001}"
     OPENCLAW_VALUES=("$ROOT_DIR/openclaw/values-anthropic.yaml")
-    MODEL_DISPLAY="Anthropic API (Claude Sonnet 4)"
+    MODEL_DISPLAY="Anthropic API ($API_MODEL)"
     ;;
   *)
     echo "ERROR: Unknown model '$MODEL'. Use 'llama', 'qwen', 'openai', or 'anthropic'."
@@ -314,6 +439,28 @@ fi
 # =============================================================================
 echo ""
 echo "=== Step 4: Installing OpenClaw ==="
+
+# If a non-default API model was selected, patch the values file to set it as
+# the default. We create a temporary copy and substitute the "primary" model.
+if [ -n "$API_MODEL" ]; then
+  VALUES_SRC="${OPENCLAW_VALUES[0]}"
+  TEMP_VALUES=$(mktemp /tmp/openclaw-values-XXXXXX.yaml)
+  trap 'rm -f "$TEMP_VALUES"' EXIT
+
+  if [ "$MODEL" = "openai" ]; then
+    # Replace the default primary model (openai/gpt-4o-mini → openai/$API_MODEL)
+    sed "s|\"primary\": \"openai/[^\"]*\"|\"primary\": \"openai/$API_MODEL\"|" \
+      "$VALUES_SRC" > "$TEMP_VALUES"
+  elif [ "$MODEL" = "anthropic" ]; then
+    # Replace the default primary model (anthropic/claude-... → anthropic/$API_MODEL)
+    sed "s|\"primary\": \"anthropic/[^\"]*\"|\"primary\": \"anthropic/$API_MODEL\"|" \
+      "$VALUES_SRC" > "$TEMP_VALUES"
+  fi
+
+  OPENCLAW_VALUES[0]="$TEMP_VALUES"
+  echo "Using API model: $API_MODEL"
+fi
+
 OPENCLAW_INSTALL_ARGS=()
 for vf in "${OPENCLAW_VALUES[@]}"; do
   OPENCLAW_INSTALL_ARGS+=(--values "$vf")
