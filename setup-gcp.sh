@@ -91,7 +91,7 @@ CURRENT_ACCOUNT=$(gcloud auth list --filter=status:ACTIVE --format="value(accoun
 if [ -n "$CURRENT_ACCOUNT" ]; then
   echo "Currently authenticated as: $CURRENT_ACCOUNT"
   read -p "Use this account? (Y/n): " USE_CURRENT
-  if [[ "${USE_CURRENT,,}" == "n" ]]; then
+  if [[ "$(echo "$USE_CURRENT" | tr '[:upper:]' '[:lower:]')" == "n" ]]; then
     echo "Opening browser for authentication..."
     gcloud auth login
   fi
@@ -138,7 +138,7 @@ gcloud projects list --format="table(projectId, name, projectNumber)" 2>/dev/nul
 echo ""
 
 read -p "Create a new project? (Y/n): " CREATE_NEW
-if [[ "${CREATE_NEW,,}" != "n" ]]; then
+if [[ "$(echo "$CREATE_NEW" | tr '[:upper:]' '[:lower:]')" != "n" ]]; then
   # Generate a default project ID (must be globally unique, 6-30 chars,
   # lowercase letters, digits, hyphens)
   DEFAULT_PROJECT_ID="openclaw-kserve-$(date +%s | tail -c 7)"
@@ -156,7 +156,7 @@ if [[ "${CREATE_NEW,,}" != "n" ]]; then
   #
   # If no org exists (personal Gmail), the project is created standalone.
   # ---------------------------------------------------------------------------
-  CREATE_FLAGS="--name=OpenClaw KServe --set-as-default"
+  CREATE_FLAGS=("--name=OpenClaw-KServe" "--set-as-default")
   ORG_LIST=$(gcloud organizations list --format="value(ID,DISPLAY_NAME)" 2>/dev/null || true)
 
   if [ -n "$ORG_LIST" ]; then
@@ -175,7 +175,7 @@ if [[ "${CREATE_NEW,,}" != "n" ]]; then
     fi
 
     read -p "Create project under an organization? (Y/n): " USE_ORG
-    if [[ "${USE_ORG,,}" != "n" ]]; then
+    if [[ "$(echo "$USE_ORG" | tr '[:upper:]' '[:lower:]')" != "n" ]]; then
       if [ -n "$DEFAULT_ORG_ID" ]; then
         read -p "Organization ID [$DEFAULT_ORG_ID]: " ORG_ID
         ORG_ID="${ORG_ID:-$DEFAULT_ORG_ID}"
@@ -196,21 +196,20 @@ if [[ "${CREATE_NEW,,}" != "n" ]]; then
         echo ""
 
         read -p "Create project under a folder? (y/N): " USE_FOLDER
-        if [[ "${USE_FOLDER,,}" == "y" ]]; then
+        if [[ "$(echo "$USE_FOLDER" | tr '[:upper:]' '[:lower:]')" == "y" ]]; then
           read -p "Folder ID: " FOLDER_ID
-          CREATE_FLAGS="--name=OpenClaw KServe --folder=$FOLDER_ID --set-as-default"
+          CREATE_FLAGS=("--name=OpenClaw-KServe" "--folder=$FOLDER_ID" "--set-as-default")
         else
-          CREATE_FLAGS="--name=OpenClaw KServe --organization=$ORG_ID --set-as-default"
+          CREATE_FLAGS=("--name=OpenClaw-KServe" "--organization=$ORG_ID" "--set-as-default")
         fi
       else
-        CREATE_FLAGS="--name=OpenClaw KServe --organization=$ORG_ID --set-as-default"
+        CREATE_FLAGS=("--name=OpenClaw-KServe" "--organization=$ORG_ID" "--set-as-default")
       fi
     fi
   fi
 
   echo "Creating project: $PROJECT_ID"
-  # shellcheck disable=SC2086
-  gcloud projects create "$PROJECT_ID" $CREATE_FLAGS
+  gcloud projects create "$PROJECT_ID" "${CREATE_FLAGS[@]}"
 
   echo "Project created successfully."
 else
@@ -413,7 +412,7 @@ if [ "$T4_LIMIT" -lt 1 ]; then
   echo "approved and you deploy the InferenceService."
   echo ""
   read -p "Continue anyway? (Y/n): " CONTINUE
-  if [[ "${CONTINUE,,}" == "n" ]]; then
+  if [[ "$(echo "$CONTINUE" | tr '[:upper:]' '[:lower:]')" == "n" ]]; then
     echo "Setup paused. Run this script again after quota is approved."
     exit 0
   fi
